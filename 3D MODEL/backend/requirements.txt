@@ -1,0 +1,9 @@
+flask
+flask-cors
+python-dotenv
+groq
+google-genai
+SpeechRecognition
+numpy
+Pillow
+trimesh

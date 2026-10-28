@@ -1,0 +1,5583 @@
+/**
+ * UIController.js
+ * Connects all UI elements to the 3D scene, morpher, hair system, and backend.
+ * Handles all DOM interactions, panel switching, slider updates, etc.
+ */
+
+class UIController {
+  constructor(sceneManager, faceMorpher, hairSystem, backendAPI, caseManager) {
+    this.scene = sceneManager;
+    this.morpher = faceMorpher;
+    this.hair = hairSystem;
+    this.api = backendAPI;
+    this.caseManager = caseManager;
+    this.skinMarkSystem = null;
+    this.historyLog = [];
+  }
+
+  init() {
+    this.bindTitleBar();
+    this.bindToolbar();
+    this.bindPanelTabs();
+    this.bindMorphSliders();
+    this.bindHairControls();
+    this.bindEyebrowControls();
+    this.bindBeardControls();
+    this.bindAppearanceControls();
+    this.bindAgeProgressionControls();
+    this.bindEyeControls();
+    this.bindEyelashControls();
+    this.bindGlassesControls();
+    this.bindFaceMaskControls();
+    this.bindEarringControls();
+    this.bindBandanaControls();
+    this.bindBrowRingControls();
+    this.bindReferenceControls();
+    this.bindVariantPickerControls();
+    this.bindTurntableControls();
+    this.bindSkinMarkControls();
+    this.bindDecalControls();
+    this.bindWrinklePainterControls();
+    this.bindLipPainterControls();
+    this.bindPigmentationPainterControls();
+    this.bindTintControls();
+    this.bindHairTintPainterControls();
+    this.bindCaseControls();
+    this.bindGroupCollapse();
+    this.bindKeyboardShortcuts();
+    this.bindBackendStatus();
+
+    // Sync skin texture params to case manager so undo/redo has initial state
+    if (this.skinTextureSystem) {
+      this.caseManager.updateAppearance('skinTextureParams', this.skinTextureSystem.getParams());
+    }
+
+    // Initial state
+    this.updatePropertyPanel();
+    this.addHistory('Session started');
+  }
+
+  // ─── Title Bar ───────────────────────────────────────────────────────────
+
+  bindTitleBar() {
+    document.getElementById('btnMinimize')?.addEventListener('click', () => {
+      window.electronAPI?.minimize();
+    });
+    document.getElementById('btnMaximize')?.addEventListener('click', () => {
+      window.electronAPI?.maximize();
+    });
+    document.getElementById('btnClose')?.addEventListener('click', () => {
+      window.electronAPI?.close();
+    });
+  }
+
+  // ─── Toolbar ─────────────────────────────────────────────────────────────
+
+  bindToolbar() {
+    // View presets
+    document.getElementById('btnFrontView')?.addEventListener('click', () => {
+      this.scene.setView('front');
+      this.updateViewAngle('Front');
+    });
+    document.getElementById('btnSideView')?.addEventListener('click', () => {
+      this.scene.setView('side');
+      this.updateViewAngle('Side');
+    });
+    document.getElementById('btn34View')?.addEventListener('click', () => {
+      this.scene.setView('34');
+      this.updateViewAngle('3/4');
+    });
+    document.getElementById('btnTopView')?.addEventListener('click', () => {
+      this.scene.setView('top');
+      this.updateViewAngle('Top');
+    });
+
+    // Wireframe toggle
+    document.getElementById('btnWireframe')?.addEventListener('click', (e) => {
+      const active = this.scene.toggleWireframe();
+      e.currentTarget.classList.toggle('active', active);
+      this.addHistory(`Wireframe ${active ? 'ON' : 'OFF'}`);
+    });
+
+    // Lighting cycle
+    document.getElementById('btnLighting')?.addEventListener('click', () => {
+      const mode = this.scene.cycleLighting();
+      this.addHistory(`Lighting: ${mode}`);
+    });
+
+    // Screenshot
+    document.getElementById('btnScreenshot')?.addEventListener('click', () => {
+      this.takeScreenshot();
+    });
+
+
+
+    // Age Progression button
+    document.getElementById('btnAgeProgression')?.addEventListener('click', () => {
+      this.toggleAgeProgressionPanel();
+    });
+
+    // Reset All Features
+    document.getElementById('btnResetAll')?.addEventListener('click', () => {
+      this.resetAllFeatures();
+    });
+
+    // Undo/Redo
+    document.getElementById('btnUndo')?.addEventListener('click', () => this.undo());
+    document.getElementById('btnRedo')?.addEventListener('click', () => this.redo());
+  }
+
+  // ─── Panel Tabs ──────────────────────────────────────────────────────────
+
+  bindPanelTabs() {
+    document.querySelectorAll('.panel-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        // Deactivate all tabs and panels
+        document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
+
+        // Activate selected
+        e.currentTarget.classList.add('active');
+        const panelId = 'panel-' + e.currentTarget.dataset.panel;
+        document.getElementById(panelId)?.classList.add('active');
+        // Note: Preview container visibility is now handled by card hover events
+      });
+    });
+  }
+
+  // ─── Morph Sliders ───────────────────────────────────────────────────────
+
+  bindMorphSliders() {
+    document.querySelectorAll('.morph-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified ${param}`);
+      };
+
+      const onInput = (e) => {
+        const value = parseInt(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = value;
+        this.updateSliderFill(e.target);
+
+        if (param) {
+          this.morpher.setMorphValue(param, value);
+          this.caseManager.updateMorphTargets(this.morpher.exportState());
+          this.updatePropertyPanel();
+        }
+      };
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          this.caseManager.endAction();
+          this.addHistory(`Changed ${this.formatParamName(param)}`);
+          isDragging = false;
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      slider.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+
+      slider.addEventListener('input', onInput);
+
+      slider.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Reset all morphs
+    document.getElementById('btnResetAllMorphs')?.addEventListener('click', () => {
+      this.caseManager.pushState('Reset all morphs');
+      this.morpher.resetAll();
+      this.caseManager.updateMorphTargets(this.morpher.exportState());
+      // Reset all slider UI
+      document.querySelectorAll('.morph-slider').forEach(slider => {
+        const param = slider.closest('.slider-control')?.dataset.param;
+        const def = param && this.morpher.getDefault ? this.morpher.getDefault(param) : 50;
+        slider.value = def;
+        const valueDisplay = slider.closest('.slider-control')?.querySelector('.slider-value');
+        if (valueDisplay) valueDisplay.textContent = String(def);
+        this.updateSliderFill(slider);
+      });
+      this.addHistory('Reset all facial features');
+      this.updatePropertyPanel();
+    });
+
+    // Reset group buttons
+    document.querySelectorAll('.btn-reset-group').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const group = btn.dataset.group;
+        this.caseManager.pushState(`Reset ${group}`);
+        this.morpher.resetGroup(group);
+        this.caseManager.updateMorphTargets(this.morpher.exportState());
+
+        // Reset sliders in this group
+        const groupBody = btn.closest('.control-group')?.querySelector('.control-group-body');
+        if (groupBody) {
+          groupBody.querySelectorAll('.morph-slider').forEach(slider => {
+            const param = slider.closest('.slider-control')?.dataset.param;
+            const def = param && this.morpher.getDefault ? this.morpher.getDefault(param) : 50;
+            slider.value = def;
+            const valueDisplay = slider.closest('.slider-control')?.querySelector('.slider-value');
+            if (valueDisplay) valueDisplay.textContent = String(def);
+            this.updateSliderFill(slider);
+          });
+        }
+
+        this.addHistory(`Reset ${group} features`);
+        this.updatePropertyPanel();
+      });
+    });
+
+    // Initialize fill position for all range sliders on load
+    document.querySelectorAll('input[type="range"]').forEach(s => this.updateSliderFill(s));
+  }
+
+  // ─── Slider Fill Helper ──────────────────────────────────────────────────
+
+  updateSliderFill(slider) {
+    const min = parseFloat(slider.min) || 0;
+    const max = parseFloat(slider.max) || 100;
+    const val = parseFloat(slider.value);
+    const pct = ((val - min) / (max - min)) * 100;
+    slider.style.setProperty('--fill-pct', pct.toFixed(1) + '%');
+  }
+
+  // ─── Hair Controls ───────────────────────────────────────────────────────
+
+  bindHairControls() {
+    // Hair style cards
+    const previewContainer = document.getElementById('hairPreviewContainer');
+    const previewVideo = document.getElementById('hairPreviewVideo');
+
+    // Map data-style to video file names
+    const hairVideoMap = {
+      hair1: '../../assets/Hair_Previews/Hair 1.mp4',
+      hair2: '../../assets/Hair_Previews/Hair 2.mp4',
+      hair3: '../../assets/Hair_Previews/Hair 3.mp4',
+      hair4: '../../assets/Hair_Previews/Hair 4.mp4',
+      hair5: '../../assets/Hair_Previews/Hair 5.mp4',
+      hair6: '../../assets/Hair_Previews/Hair 6.mp4',
+      hair7: '../../assets/Hair_Previews/Hair 7.mp4',
+      hair8: '../../assets/Hair_Previews/Hair 8.mp4',
+      hair9: '../../assets/Hair_Previews/Hair 9.mp4',
+      hair10: '../../assets/Hair_Previews/Hair 10.mp4',
+      hair11: '../../assets/Hair_Previews/Hair 11.mp4',
+      hair12: '../../assets/Hair_Previews/Hair 12.mp4',
+      hair13: '../../assets/Hair_Previews/Hair 13.mp4',
+      hair14: '../../assets/Hair_Previews/Hair 14.mp4',
+      bald: '../../assets/Hair_Previews/Bald.mp4',
+    };
+
+    const updatePreviewVideo = (style) => {
+      const videoSrc = hairVideoMap[style];
+      if (videoSrc) {
+        previewVideo.src = videoSrc;
+        previewVideo.playbackRate = 1.3;
+        previewVideo.currentTime = 0;
+        previewVideo.play().catch(() => {});
+      } else {
+        previewVideo.pause();
+        previewVideo.removeAttribute('src');
+        previewVideo.load();
+      }
+    };
+
+    // Set initial active video
+    const initActiveHair = document.querySelector('#hairStyleGrid .hair-style-card.active');
+    if (initActiveHair) {
+      updatePreviewVideo(initActiveHair.dataset.style);
+    }
+
+    document.querySelectorAll('#hairStyleGrid .hair-style-card').forEach(card => {
+      // Hover preview video
+      card.addEventListener('mouseenter', (e) => {
+        updatePreviewVideo(card.dataset.style);
+        if (previewContainer) previewContainer.style.display = 'block';
+      });
+
+      card.addEventListener('mouseleave', () => {
+        if (previewContainer) previewContainer.style.display = 'none';
+        const activeCard = document.querySelector('#hairStyleGrid .hair-style-card.active');
+        if (activeCard) {
+          updatePreviewVideo(activeCard.dataset.style);
+        } else {
+          updatePreviewVideo(null);
+        }
+      });
+
+      // Click handler
+      card.addEventListener('click', (e) => {
+        this.caseManager.pushState(`Hair style: ${card.dataset.style}`);
+        document.querySelectorAll('#hairStyleGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        const style = card.dataset.style;
+        const appliedDefaults = this.hair.setStyle(style);
+
+        // Update position sliders to reflect model-specific defaults
+        if (appliedDefaults) {
+          this._updateHairPositionSliders(appliedDefaults);
+        }
+
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.addHistory(`Hair style: ${this.formatStyleName(style)}`);
+        this.updatePropertyPanel();
+        updatePreviewVideo(style);
+      });
+    });
+
+    // Hair property sliders
+    document.querySelectorAll('.hair-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified hair ${param}`);
+      };
+
+      const onInput = (e) => {
+        const value = parseInt(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = value;
+
+        if (param) {
+          if (param.startsWith('hair')) {
+            const key = param.replace('hair', '').toLowerCase();
+            this.hair.setParam(key, value);
+          }
+        }
+      };
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          this.caseManager.updateHairParams(this.hair.getParams());
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      slider.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+
+      slider.addEventListener('input', onInput);
+
+      slider.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Reset hair position button - resets to model-specific defaults
+    document.getElementById('btnResetHairPosition')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset hair position');
+
+      // Get model-specific defaults (or fallback to 50)
+      const config = this.hair.hairModels[this.hair.currentStyle];
+      const defaults = config?.defaults || { posx: 50, posy: 50, posz: 50, roty: 50, scale: 50 };
+
+      ['posx', 'posy', 'posz', 'roty', 'scale'].forEach(key => {
+        this.hair.setParam(key, defaults[key]);
+      });
+
+      this._updateHairPositionSliders(defaults);
+
+      this.caseManager.updateHairParams(this.hair.getParams());
+      this.addHistory('Reset hair position');
+    });
+
+    // Save hair position as default button
+    document.getElementById('btnSaveHairDefault')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const saved = this.hair.saveHairDefault();
+      if (saved) {
+        this.addHistory(`Saved ${this.hair.currentStyle} default position`);
+        alert(`Default saved for ${this.hair.currentStyle}!\nCheck console (F12) for the config to copy into HairSystem.js`);
+      }
+    });
+
+    // Hair color presets
+    document.querySelectorAll('#hairColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed hair color');
+        document.querySelectorAll('#hairColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        this.hair.setColor(color);
+        document.getElementById('hairColorPicker').value = color;
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.addHistory('Changed hair color');
+      });
+    });
+
+    // Hair color picker
+    {
+      let _hairColorCapturing = false;
+      const hairColorPicker = document.getElementById('hairColorPicker');
+      hairColorPicker?.addEventListener('input', (e) => {
+        if (!_hairColorCapturing) {
+          this.caseManager.beginAction('Changed hair color');
+          _hairColorCapturing = true;
+        }
+        this.hair.setColor(e.target.value);
+        document.querySelectorAll('#hairColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+      });
+      hairColorPicker?.addEventListener('change', () => {
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.caseManager.endAction();
+        _hairColorCapturing = false;
+        this.addHistory('Changed hair color');
+      });
+    }
+
+    // ── Render with Blender (disabled — re-enable when hair transform pipeline is fixed) ──
+    // To re-enable: uncomment the block below and unhide #renderSection in index.html
+    /*
+    document.getElementById('btnRenderBlender')?.addEventListener('click', async () => {
+      this.showLoading('Preparing morphed mesh for render...');
+
+      // ── Upload current morphed mesh to backend so Blender uses it ──
+      try {
+        if (this.facePointEditor) {
+          const objData = this.facePointEditor.exportCurrentMeshAsOBJ();
+          if (objData) {
+            const uploadResult = await this.api.uploadMorphedMesh(objData);
+            if (uploadResult?.error) {
+              console.warn('Mesh upload failed, Blender will use base model:', uploadResult.error);
+            } else {
+              console.log('Morphed mesh uploaded for render');
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Mesh export/upload error, Blender will use base model:', err);
+      }
+
+      this.showLoading('Rendering with Blender (this may take a minute)...');
+
+      // Gather render settings from UI
+      const engine = document.getElementById('renderEngine')?.value || 'EEVEE';
+      const quality = document.getElementById('renderQuality')?.value || 'medium';
+
+      // Gather scene data to send to Blender
+      const hairParams = this.hair.getParams();
+      const skinColor = document.getElementById('skinColorPicker')?.value || '#d4a574';
+      const hairColor = document.getElementById('hairColorPicker')?.value || '#2c1b0e';
+
+      // Get the precise hair transform from the frontend scene
+      const hairTransform = this.hair.getRenderTransform();
+      console.log('Hair transform for render:', JSON.stringify(hairTransform));
+
+      const result = await this.api.renderScene({
+        hairStyle: hairParams.style || 'hair1',
+        hairColor: hairColor,
+        skinColor: skinColor,
+        engine: engine,
+        quality: quality,
+        hairTransform: hairTransform,
+      });
+
+      this.hideLoading();
+
+      if (result?.error) {
+        this.addHistory('Blender render failed: ' + result.error);
+        alert('Render failed: ' + result.error);
+      } else if (result?.render_url) {
+        // Open rendered image in a new window or download it
+        const renderUrl = `http://127.0.0.1:5001${result.render_url}`;
+        const win = window.open(renderUrl, '_blank', 'width=1280,height=720');
+        if (!win) {
+          // Fallback: download
+          const link = document.createElement('a');
+          link.href = renderUrl;
+          link.download = result.filename || 'render.png';
+          link.click();
+        }
+        this.addHistory('Blender render complete');
+      } else {
+        this.addHistory('Blender render returned no image');
+      }
+    });
+    */
+  }
+
+  // ─── Eyebrow Controls ───────────────────────────────────────────────────
+
+  bindEyebrowControls() {
+    // Eyebrow param sliders
+    document.querySelectorAll('.eyebrow-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified eyebrow ${param}`);
+      };
+
+      const onInput = (e) => {
+        const value = parseInt(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = value;
+
+        if (param) {
+          const key = param.replace('eyebrow', '');
+          const ebKey = key.charAt(0).toLowerCase() + key.slice(1);
+          this.hair.setEyebrowParam(ebKey, value);
+        }
+      };
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          this.caseManager.updateHairParams(this.hair.getParams());
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      slider.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+
+      slider.addEventListener('input', onInput);
+
+      slider.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Eyebrow color presets
+    document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed eyebrow color');
+        document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        this.hair.setEyebrowColor(color);
+        document.getElementById('eyebrowColorPicker').value = color;
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.addHistory('Changed eyebrow color');
+      });
+    });
+
+    // Eyebrow color picker
+    {
+      let _ebColorCapturing = false;
+      const ebColorPicker = document.getElementById('eyebrowColorPicker');
+      ebColorPicker?.addEventListener('input', (e) => {
+        if (!_ebColorCapturing) {
+          this.caseManager.beginAction('Changed eyebrow color');
+          _ebColorCapturing = true;
+        }
+        this.hair.setEyebrowColor(e.target.value);
+        document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+      });
+      ebColorPicker?.addEventListener('change', () => {
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.caseManager.endAction();
+        _ebColorCapturing = false;
+        this.addHistory('Changed eyebrow color');
+      });
+    }
+
+    // Reset eyebrows button
+    document.getElementById('btnResetEyebrows')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset eyebrows');
+
+      const defaults = { thickness: 100, arch: 0, spacing: 42, density: 70,
+                          posX: 51, posY: 72, posZ: 49, rotation: 100, scale: 65,
+                          straighten: 51, tiltX: 69, length: 50, opacity: 85 };
+      Object.entries(defaults).forEach(([key, val]) => {
+        this.hair.setEyebrowParam(key, val);
+      });
+      this.hair.setEyebrowColor('#2c1b0e');
+
+      const groupBody = e.currentTarget.closest('.control-group')?.querySelector('.control-group-body');
+      if (groupBody) {
+        groupBody.querySelectorAll('.eyebrow-slider').forEach(slider => {
+          const control = slider.closest('.slider-control');
+          const param = control?.dataset.param;
+          const resetDefaults = { eyebrowThickness: 100, eyebrowArch: 0, eyebrowSpacing: 42,
+            eyebrowDensity: 70, eyebrowPosX: 51, eyebrowPosY: 72, eyebrowPosZ: 49,
+            eyebrowRotation: 100, eyebrowScale: 65, eyebrowStraighten: 51, eyebrowTiltX: 69,
+            eyebrowLength: 50, eyebrowOpacity: 85 };
+          const defaultVal = resetDefaults[param] ?? 50;
+          slider.value = defaultVal;
+          const vd = control?.querySelector('.slider-value');
+          if (vd) vd.textContent = defaultVal;
+        });
+      }
+
+      const picker = document.getElementById('eyebrowColorPicker');
+      if (picker) picker.value = '#2c1b0e';
+      document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => {
+        s.classList.toggle('active', s.dataset.color === '#2c1b0e');
+      });
+
+      // Reset eyebrow tint
+      this.hair.setEyebrowTintIntensity(0);
+      this.hair.setEyebrowTintColor('#8b2500');
+      const ebTintPicker = document.getElementById('eyebrowTintPicker');
+      if (ebTintPicker) ebTintPicker.value = '#8b2500';
+      const ebTintSlider = document.getElementById('eyebrowTintIntensity');
+      if (ebTintSlider) ebTintSlider.value = 0;
+      const ebTintValue = document.getElementById('eyebrowTintIntensityValue');
+      if (ebTintValue) ebTintValue.textContent = '0';
+      document.querySelectorAll('#eyebrowTintPresets .color-swatch').forEach(s => s.classList.remove('active'));
+
+      this.caseManager.updateHairParams(this.hair.getParams());
+      this.addHistory('Reset eyebrows');
+    });
+  }
+
+  // ─── Beard Controls ──────────────────────────────────────────────────────
+
+  bindBeardControls() {
+    // Beard style dropdown
+    document.getElementById('beardStyle')?.addEventListener('change', (e) => {
+      this.caseManager.pushState(`Beard style: ${e.target.value}`);
+      const appliedDefaults = this.hair.setBeard(e.target.value);
+
+      // Update position sliders to reflect model-specific defaults
+      if (appliedDefaults) {
+        this._updateBeardPositionSliders(appliedDefaults);
+      }
+
+      this.caseManager.updateHairParams(this.hair.getParams());
+      this.addHistory(`Beard: ${this.formatStyleName(e.target.value)}`);
+    });
+
+    // Beard param sliders
+    document.querySelectorAll('.beard-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified beard ${param}`);
+      };
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          this.caseManager.updateHairParams(this.hair.getParams());
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      slider.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+
+      slider.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = value;
+
+        if (param) {
+          const key = param.replace('beard', '');
+          const beardKey = key.charAt(0).toLowerCase() + key.slice(1);
+          this.hair.setBeardParam(beardKey, value);
+        }
+      });
+    });
+
+    // Beard color presets
+    document.querySelectorAll('#beardColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed beard color');
+        document.querySelectorAll('#beardColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        this.hair.setBeardColor(color);
+        document.getElementById('beardColorPicker').value = color;
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.addHistory('Changed beard color');
+      });
+    });
+
+    // Beard color picker
+    {
+      let _beardColorCapturing = false;
+      const beardColorPicker = document.getElementById('beardColorPicker');
+      beardColorPicker?.addEventListener('input', (e) => {
+        if (!_beardColorCapturing) {
+          this.caseManager.beginAction('Changed beard color');
+          _beardColorCapturing = true;
+        }
+        this.hair.setBeardColor(e.target.value);
+        document.querySelectorAll('#beardColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+      });
+      beardColorPicker?.addEventListener('change', () => {
+        this.caseManager.updateHairParams(this.hair.getParams());
+        this.caseManager.endAction();
+        _beardColorCapturing = false;
+        this.addHistory('Changed beard color');
+      });
+    }
+
+    // Reset beard button - resets to model-specific defaults
+    document.getElementById('btnResetBeard')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset beard');
+
+      // Get model-specific defaults (or fallback to center values)
+      const config = this.hair.beardModels[this.hair.beardStyle];
+      const defaults = config?.defaults || { scale: 100, posX: 100, posY: 100, posZ: 100, rotX: 100, rotY: 100, rotZ: 100 };
+
+      Object.entries(defaults).forEach(([key, val]) => {
+        this.hair.setBeardParam(key, val);
+      });
+      this.hair.setBeardColor('#2c1b0e');
+
+      this._updateBeardPositionSliders(defaults);
+
+      const picker = document.getElementById('beardColorPicker');
+      if (picker) picker.value = '#2c1b0e';
+      document.querySelectorAll('#beardColorPresets .color-swatch').forEach(s => {
+        s.classList.toggle('active', s.dataset.color === '#2c1b0e');
+      });
+
+      // Reset beard tint
+      this.hair.setBeardTintIntensity(0);
+      this.hair.setBeardTintColor('#8b2500');
+      const beardTintPicker = document.getElementById('beardTintPicker');
+      if (beardTintPicker) beardTintPicker.value = '#8b2500';
+      const beardTintSlider = document.getElementById('beardTintIntensity');
+      if (beardTintSlider) beardTintSlider.value = 0;
+      const beardTintValue = document.getElementById('beardTintIntensityValue');
+      if (beardTintValue) beardTintValue.textContent = '0';
+      document.querySelectorAll('#beardTintPresets .color-swatch').forEach(s => s.classList.remove('active'));
+
+      this.caseManager.updateHairParams(this.hair.getParams());
+      this.addHistory('Reset beard');
+    });
+
+    // Save beard position as default button → opens the Defaults Editor modal
+    document.getElementById('btnSaveBeardDefault')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Snapshot current sliders into memory first
+      if (this.hair.beardStyle !== 'none') {
+        this.hair.saveBeardDefault();
+      }
+      this._openBeardDefaultsModal();
+    });
+
+    // Initialise modal once
+    this._initBeardDefaultsModal();
+  }
+
+  // ─── Beard Defaults Editor Modal ────────────────────────────────────────
+
+  _initBeardDefaultsModal() {
+    const modal     = document.getElementById('beardDefaultsModal');
+    const closeBtn  = document.getElementById('btnBeardDefaultsClose');
+    const cancelBtn = document.getElementById('btnBeardDefaultsCancel');
+    const saveBtn   = document.getElementById('btnBeardDefaultsSaveAll');
+    const exportBtn = document.getElementById('btnBeardDefaultsExport');
+    const importBtn = document.getElementById('btnBeardDefaultsImport');
+    const fileInput = document.getElementById('beardDefaultsFileInput');
+    const clearBtn  = document.getElementById('btnBeardDefaultsClearStorage');
+    if (!modal) return;
+
+    const closeModal = () => { modal.style.display = 'none'; };
+    closeBtn?.addEventListener('click', closeModal);
+    cancelBtn?.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    // Save All
+    saveBtn?.addEventListener('click', () => {
+      const allDefaults = this._collectBeardDefaultsFromModal();
+      this.hair.saveAllBeardDefaultsToStorage(allDefaults);
+      this.addHistory('Saved all facial hair defaults');
+      closeModal();
+      // Flash confirmation
+      saveBtn.textContent = '✓ Saved!';
+      setTimeout(() => { saveBtn.innerHTML = '<i class="fas fa-save"></i> Save All Defaults'; }, 1500);
+    });
+
+    // Export JSON
+    exportBtn?.addEventListener('click', () => {
+      const allDefaults = this._collectBeardDefaultsFromModal();
+      const json = JSON.stringify(allDefaults, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'facial_hair_defaults.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Import JSON
+    importBtn?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          this._populateBeardDefaultsModal(data);
+          fileInput.value = '';
+        } catch {
+          alert('Invalid JSON file.');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Clear localStorage defaults
+    clearBtn?.addEventListener('click', () => {
+      if (!confirm('Clear all saved defaults? The built-in code defaults will be used instead.')) return;
+      localStorage.removeItem('rf_beardDefaults_v2');
+      // Reload code-built defaults
+      this.addHistory('Cleared all facial hair saved defaults');
+      closeModal();
+      alert('Cleared. Reload the page for built-in defaults to take effect.');
+    });
+  }
+
+  _openBeardDefaultsModal() {
+    const modal = document.getElementById('beardDefaultsModal');
+    if (!modal) return;
+    const allDefaults = this.hair.getAllBeardDefaults();
+    this._populateBeardDefaultsModal(allDefaults);
+    modal.style.display = 'flex';
+  }
+
+  _populateBeardDefaultsModal(allDefaults) {
+    const body = document.getElementById('beardDefaultsBody');
+    if (!body) return;
+
+    const PARAMS = [
+      { key: 'scale', label: 'Scale',         range: [0, 500], neutral: 100 },
+      { key: 'posX',  label: 'Pos X (L/R)',   range: [0, 200], neutral: 100 },
+      { key: 'posY',  label: 'Pos Y (Up/Dn)', range: [0, 200], neutral: 100 },
+      { key: 'posZ',  label: 'Pos Z (Fwd/Bk)',range: [0, 200], neutral: 100 },
+      { key: 'rotX',  label: 'Rot X (Fwd/Bk Tilt — fix upward)', range: [0, 200], neutral: 100 },
+      { key: 'rotY',  label: 'Rot Y (Twist)', range: [0, 200], neutral: 100 },
+      { key: 'rotZ',  label: 'Rot Z (Angle)', range: [0, 200], neutral: 100 },
+    ];
+
+    const styleNames = {
+      beard1: 'Beard 1', beard2: 'Beard 2', beard3: 'Beard 3', beard4: 'Beard 4',
+      beard5: 'Beard 5', beard6: 'Beard 6', beard7: 'Beard 7', moustache1: 'Moustache 1',
+    };
+
+    body.innerHTML = '';
+
+    for (const [style, styleName] of Object.entries(styleNames)) {
+      const vals = allDefaults[style] || {};
+
+      const card = document.createElement('div');
+      card.className = 'bd-style-card';
+
+      // Style header with Copy button
+      const header = document.createElement('div');
+      header.className = 'bd-style-header';
+      header.innerHTML = `
+        <span class="bd-style-title">${styleName}</span>
+        <div class="bd-style-actions">
+          <button class="btn-copy-current bd-style-btn" data-style="${style}" title="Copy current slider values here"><i class="fas fa-arrow-down"></i> Use Current</button>
+          <button class="btn-reset-style bd-style-btn" data-style="${style}" title="Reset to neutral 100"><i class="fas fa-undo"></i> Reset</button>
+          <i class="fas fa-chevron-down bd-style-chevron"></i>
+        </div>`;
+
+      const body2 = document.createElement('div');
+      body2.className = 'bd-style-body';
+
+      for (const p of PARAMS) {
+        const val = vals[p.key] ?? p.neutral;
+        const row = document.createElement('div');
+        row.className = 'bd-param-row';
+        row.innerHTML = `
+          <label>${p.label}</label>
+          <div class="bd-param-controls">
+            <input type="range" min="${p.range[0]}" max="${p.range[1]}" value="${val}"
+                   data-style="${style}" data-param="${p.key}"
+                   class="bd-range-input">
+            <input type="number" min="${p.range[0]}" max="${p.range[1]}" value="${val}"
+                   data-style="${style}" data-param="${p.key}"
+                   class="bd-num-input">
+          </div>`;
+        body2.appendChild(row);
+      }
+
+      card.appendChild(header);
+      card.appendChild(body2);
+      body.appendChild(card);
+
+      // Collapsible
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        const isOpen = body2.style.display !== 'none';
+        body2.style.display = isOpen ? 'none' : 'grid';
+        const icon = header.querySelector('.fa-chevron-down, .fa-chevron-right');
+        if (icon) {
+          icon.classList.toggle('fa-chevron-down', !isOpen);
+          icon.classList.toggle('fa-chevron-right', isOpen);
+        }
+      });
+
+      // Use Current slider values
+      header.querySelector('.btn-copy-current')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const st = e.currentTarget.dataset.style;
+        if (this.hair.beardStyle === st) {
+          // Copy live beardParams
+          const bp = this.hair.beardParams;
+          const live = { scale:bp.scale, posX:bp.posX, posY:bp.posY, posZ:bp.posZ,
+                         rotX:bp.rotX??100, rotY:bp.rotY, rotZ:bp.rotZ };
+          body2.querySelectorAll('.bd-range-input, .bd-num-input').forEach(inp => {
+            const v = live[inp.dataset.param] ?? 100;
+            inp.value = v;
+          });
+        } else {
+          alert(`Switch to ${styleName} first, position it with the sliders, then click "Use Current".`);
+        }
+      });
+
+      // Reset style to neutral
+      header.querySelector('.btn-reset-style')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        body2.querySelectorAll('.bd-range-input, .bd-num-input').forEach(inp => { inp.value = 100; });
+      });
+    }
+
+    // Sync range ↔ number inputs
+    body.addEventListener('input', (e) => {
+      const inp = e.target;
+      if (!inp.classList.contains('bd-range-input') && !inp.classList.contains('bd-num-input')) return;
+      const st = inp.dataset.style;
+      const pm = inp.dataset.param;
+      const isRange = inp.classList.contains('bd-range-input');
+      const partner = body.querySelector(
+        `.${isRange ? 'bd-num-input' : 'bd-range-input'}[data-style="${st}"][data-param="${pm}"]`
+      );
+      if (partner) partner.value = inp.value;
+    });
+  }
+
+  _collectBeardDefaultsFromModal() {
+    const body = document.getElementById('beardDefaultsBody');
+    if (!body) return {};
+    const result = {};
+    body.querySelectorAll('.bd-num-input').forEach(inp => {
+      const style = inp.dataset.style;
+      const param = inp.dataset.param;
+      if (!result[style]) result[style] = {};
+      result[style][param] = parseInt(inp.value, 10);
+    });
+    return result;
+  }
+
+  // ─── Appearance Controls ─────────────────────────────────────────────────
+
+  bindAppearanceControls() {
+    // Skin tone swatches
+    document.querySelectorAll('#skinToneGrid .skin-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed skin tone');
+        document.querySelectorAll('#skinToneGrid .skin-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        this.scene.setSkinColor(color);
+        document.getElementById('skinColorPicker').value = color;
+        this.caseManager.updateAppearance('skinColor', color);
+        this.addHistory('Changed skin tone');
+        this.updatePropertyPanel();
+      });
+    });
+
+    // Skin color picker
+    {
+      let _skinColorCapturing = false;
+      const skinColorPicker = document.getElementById('skinColorPicker');
+      skinColorPicker?.addEventListener('input', (e) => {
+        if (!_skinColorCapturing) {
+          this.caseManager.beginAction('Changed skin color');
+          _skinColorCapturing = true;
+        }
+        this.scene.setSkinColor(e.target.value);
+        document.querySelectorAll('#skinToneGrid .skin-swatch').forEach(s => s.classList.remove('active'));
+        this.caseManager.updateAppearance('skinColor', e.target.value);
+      });
+      skinColorPicker?.addEventListener('change', () => {
+        this.caseManager.endAction();
+        _skinColorCapturing = false;
+        this.addHistory('Changed skin color');
+        this.updatePropertyPanel();
+      });
+    }
+
+    // Lip color swatches
+    document.querySelectorAll('#lipColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed lip color');
+        document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        this.scene.setLipColor(color);
+        document.getElementById('lipColorPicker').value = color;
+        this.caseManager.updateAppearance('lipColor', color);
+        this.addHistory('Changed lip color');
+        this.updatePropertyPanel();
+      });
+    });
+
+    // Lip color picker
+    {
+      let _lipColorCapturing = false;
+      const lipColorPicker = document.getElementById('lipColorPicker');
+      lipColorPicker?.addEventListener('input', (e) => {
+        if (!_lipColorCapturing) {
+          this.caseManager.beginAction('Changed lip color');
+          _lipColorCapturing = true;
+        }
+        this.scene.setLipColor(e.target.value);
+        document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        this.caseManager.updateAppearance('lipColor', e.target.value);
+      });
+      lipColorPicker?.addEventListener('change', () => {
+        this.caseManager.endAction();
+        _lipColorCapturing = false;
+        this.addHistory('Changed lip color');
+        this.updatePropertyPanel();
+      });
+    }
+
+    // Reset lip color button
+    document.getElementById('btnResetLipColor')?.addEventListener('click', () => {
+      this.caseManager.pushState('Reset lip color');
+      this.scene.setLipColor(null);
+      this.caseManager.updateAppearance('lipColor', null);
+      document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+      this.addHistory('Reset lip color');
+      this.updatePropertyPanel();
+    });
+
+    // Eye color
+    document.querySelectorAll('#eyeColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed eye color');
+        document.querySelectorAll('#eyeColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+
+        const color = swatch.dataset.color;
+        if (this.eyeSystem) {
+          this.eyeSystem.setEyeColor(color);
+          this.caseManager.updateAppearance('eyeParams', this.eyeSystem.getParams());
+        }
+        document.getElementById('eyeColorPicker').value = color;
+        this.caseManager.updateAppearance('eyeColor', color);
+        this.addHistory('Changed eye color');
+        this.updatePropertyPanel();
+      });
+    });
+
+    // Eye color picker
+    {
+      let _eyeColorCapturing = false;
+      const eyeColorPicker = document.getElementById('eyeColorPicker');
+      eyeColorPicker?.addEventListener('input', (e) => {
+        if (!_eyeColorCapturing) {
+          this.caseManager.beginAction('Changed eye color');
+          _eyeColorCapturing = true;
+        }
+        if (this.eyeSystem) {
+          this.eyeSystem.setEyeColor(e.target.value);
+          this.caseManager.updateAppearance('eyeParams', this.eyeSystem.getParams());
+        }
+        document.querySelectorAll('#eyeColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        this.caseManager.updateAppearance('eyeColor', e.target.value);
+      });
+      eyeColorPicker?.addEventListener('change', () => {
+        this.caseManager.endAction();
+        _eyeColorCapturing = false;
+        this.addHistory('Changed eye color');
+        this.updatePropertyPanel();
+      });
+    }
+
+    // Demographics
+    document.getElementById('ageRange')?.addEventListener('change', (e) => {
+      this.caseManager.pushState('Changed age range');
+      this.caseManager.updateAppearance('ageRange', e.target.value);
+      this.addHistory('Changed age range');
+    });
+    document.getElementById('sexSelect')?.addEventListener('change', (e) => {
+      this.caseManager.pushState('Changed sex');
+      this.caseManager.updateAppearance('sex', e.target.value);
+      this.addHistory('Changed sex');
+    });
+
+    // ── Skin Texture Sliders ──
+    this.bindSkinTextureControls();
+  }
+
+  // ─── Skin Texture & Aging Controls ──────────────────────────────────────
+
+  bindSkinTextureControls() {
+    const sliderMap = {
+      sliderSkinAge:       { param: 'age',         valId: 'valSkinAge' },
+      sliderWrinkleDepth:  { param: 'wrinkleDepth', valId: 'valWrinkleDepth' },
+      sliderSkinRoughness: { param: 'roughness',    valId: 'valSkinRoughness' },
+      sliderPoreDetail:    { param: 'poreDetail',   valId: 'valPoreDetail' },
+      sliderSunDamage:     { param: 'sunDamage',    valId: 'valSunDamage' },
+    };
+
+    let _skinTexDebounce = null;
+
+    for (const [sliderId, cfg] of Object.entries(sliderMap)) {
+      const slider = document.getElementById(sliderId);
+      const valEl = document.getElementById(cfg.valId);
+      if (!slider) continue;
+
+      let isDragging = false;
+
+      slider.addEventListener('mousedown', () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Changed skin ${cfg.param}`);
+      });
+
+      slider.addEventListener('input', (e) => {
+        const v = parseInt(e.target.value, 10);
+        if (valEl) valEl.textContent = v;
+
+        if (this.skinTextureSystem) {
+          this.skinTextureSystem.setParam(cfg.param, v);
+
+          // Debounce regeneration for performance (texture gen is expensive)
+          if (_skinTexDebounce) clearTimeout(_skinTexDebounce);
+          _skinTexDebounce = setTimeout(() => {
+            this.skinTextureSystem.regenerate();
+          }, 150);
+        }
+      });
+
+      const onMouseUp = () => {
+        if (isDragging) {
+          isDragging = false;
+          if (this.skinTextureSystem) {
+            this.caseManager.updateAppearance('skinTextureParams', this.skinTextureSystem.getParams());
+          }
+          this.caseManager.endAction();
+          this.addHistory(`Changed skin ${cfg.param}`);
+          this.updatePropertyPanel();
+          document.removeEventListener('mouseup', onMouseUp);
+        }
+      };
+
+      slider.addEventListener('mousedown', () => {
+        document.addEventListener('mouseup', onMouseUp);
+      });
+    }
+
+    // Reset button
+    document.getElementById('btnResetSkinTexture')?.addEventListener('click', () => {
+      this.caseManager.pushState('Reset skin texture');
+      if (this.skinTextureSystem) {
+        this.skinTextureSystem.params = {
+          age: 20, roughness: 50, freckles: 0,
+          poreDetail: 0, wrinkleDepth: 30, skinOiliness: 0, sunDamage: 10,
+        };
+        this.skinTextureSystem.regenerate();
+        this.caseManager.updateAppearance('skinTextureParams', this.skinTextureSystem.getParams());
+      }
+      // Reset slider UI
+      for (const [sliderId, cfg] of Object.entries(sliderMap)) {
+        const slider = document.getElementById(sliderId);
+        const valEl = document.getElementById(cfg.valId);
+        const defaults = { age: 20, wrinkleDepth: 30, roughness: 50, poreDetail: 0, sunDamage: 10 };
+        const def = defaults[cfg.param] ?? 50;
+        if (slider) slider.value = def;
+        if (valEl) valEl.textContent = def;
+      }
+      this.addHistory('Reset skin texture');
+      this.updatePropertyPanel();
+    });
+  }
+
+  // ─── Age Progression Controls ────────────────────────────────────────────
+
+  bindAgeProgressionControls() {
+    // Use event delegation on the overlay container since buttons are initially hidden
+    const overlay = document.getElementById('ageProgressionOverlay');
+    
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        // Handle age card clicks
+        const ageCard = e.target.closest('.age-card');
+        if (ageCard) {
+          const years = parseInt(ageCard.dataset.years);
+          this.applyAgeProgression(years);
+          
+          // Update active state
+          document.querySelectorAll('.age-card').forEach(c => c.classList.remove('active'));
+          ageCard.classList.add('active');
+          return;
+        }
+        
+        // Handle Undo button
+        if (e.target.closest('#btnAgeUndo')) {
+          console.log('Undo button clicked');
+          this.undo();
+          document.querySelectorAll('.age-card').forEach(c => c.classList.remove('active'));
+          return;
+        }
+        
+        // Handle Redo button
+        if (e.target.closest('#btnAgeRedo')) {
+          console.log('Redo button clicked');
+          this.redo();
+          document.querySelectorAll('.age-card').forEach(c => c.classList.remove('active'));
+          return;
+        }
+        
+        // Handle Close button
+        if (e.target.closest('#btnCloseAgeOverlay')) {
+          this.toggleAgeProgressionPanel();
+          return;
+        }
+      });
+    }
+  }
+
+  toggleAgeProgressionPanel() {
+    const overlay = document.getElementById('ageProgressionOverlay');
+    const btn = document.getElementById('btnAgeProgression');
+    
+    if (overlay) {
+      const isCurrentlyVisible = overlay.style.display !== 'none';
+      
+      if (isCurrentlyVisible) {
+        // Hide the overlay
+        overlay.style.display = 'none';
+        btn?.classList.remove('active');
+        
+        // When closing, clear the active selection but keep the applied age
+        document.querySelectorAll('.age-card').forEach(c => c.classList.remove('active'));
+      } else {
+        // Show the overlay
+        overlay.style.display = 'flex';
+        btn?.classList.add('active');
+        
+        // DON'T reset originalAgeParams here - let it persist so Reset works
+      }
+    }
+  }
+
+  applyAgeProgression(years) {
+    if (!this.skinTextureSystem) return;
+
+    // Store original parameters ONLY ONCE (first time user clicks an age option)
+    if (!this.originalAgeParams) {
+      this.originalAgeParams = {
+        age: this.skinTextureSystem.params.age,
+        poreDetail: this.skinTextureSystem.params.poreDetail
+      };
+      console.log('Stored original params:', this.originalAgeParams);
+    }
+
+    this.caseManager.pushState(`Age progression: +${years} years`);
+
+    // Calculate age progression values - ONLY PORES
+    // Base values from original stored state
+    const baseAge = this.originalAgeParams.age;
+    const basePoreDetail = this.originalAgeParams.poreDetail;
+
+    // New age value
+    const newAge = Math.min(100, baseAge + years);
+    
+    // Pore detail increases with age (more visible pores)
+    // Progressive scaling: more visible pores as aging progresses
+    const poreIncrement = Math.min(40, years * 1.6); // +1.6 per year, max +40
+    const newPoreDetail = Math.min(100, basePoreDetail + poreIncrement);
+
+    console.log(`Applying age progression: +${years} years`);
+    console.log(`Age: ${baseAge} -> ${newAge}`);
+    console.log(`Pores: ${basePoreDetail} -> ${newPoreDetail}`);
+
+    // Apply ONLY age and pore changes
+    this.skinTextureSystem.setParam('age', newAge);
+    this.skinTextureSystem.setParam('poreDetail', newPoreDetail);
+    this.skinTextureSystem.regenerate();
+
+    // Update UI sliders
+    const sliderAge = document.getElementById('sliderSkinAge');
+    const valAge = document.getElementById('valSkinAge');
+    if (sliderAge) sliderAge.value = newAge;
+    if (valAge) valAge.textContent = newAge;
+
+    const sliderPore = document.getElementById('sliderPoreDetail');
+    const valPore = document.getElementById('valPoreDetail');
+    if (sliderPore) sliderPore.value = newPoreDetail;
+    if (valPore) valPore.textContent = newPoreDetail;
+
+    this.caseManager.updateAppearance('skinTextureParams', this.skinTextureSystem.getParams());
+    this.addHistory(`Applied +${years} years age progression (pores)`);
+    this.updatePropertyPanel();
+  }
+
+  // ─── Eye Controls ───────────────────────────────────────────────────────
+
+  bindEyeControls() {
+    // Eye param sliders (scale/spacing/position/rotation)
+    document.querySelectorAll('.eye-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onPointerDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified eye ${param}`);
+      };
+
+      const onPointerUp = () => {
+        if (isDragging) {
+          if (this.eyeSystem) {
+            this.caseManager.updateAppearance('eyeParams', this.eyeSystem.getParams());
+          }
+          this.caseManager.endAction();
+          this.addHistory(`Changed ${this.formatParamName(param)}`);
+          isDragging = false;
+          document.removeEventListener('pointerup', onPointerUp);
+        }
+      };
+
+      slider.addEventListener('pointerdown', () => {
+        onPointerDown();
+        document.addEventListener('pointerup', onPointerUp);
+      });
+
+      slider.addEventListener('pointerup', onPointerUp);
+
+      slider.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value, 10);
+        if (valueDisplay) valueDisplay.textContent = value;
+        if (!this.eyeSystem || !param || !param.startsWith('eye')) return;
+
+        const key = param.replace('eye', '');
+        const eyeKey = key.charAt(0).toLowerCase() + key.slice(1);
+        this.eyeSystem.setParam(eyeKey, value);
+      });
+    });
+
+    // Reset eye placement
+    document.getElementById('btnResetEyePosition')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset eye positioning');
+      if (!this.eyeSystem) return;
+
+      const defaults = {
+        scale: 50,
+        spacing: 50,
+        posX: 50,
+        posY: 50,
+        posZ: 50,
+        rotX: 50,
+        rotY: 50,
+        rotZ: 50,
+        opacity: 100,
+      };
+      Object.entries(defaults).forEach(([key, val]) => this.eyeSystem.setParam(key, val));
+
+      const eyeParamDefaults = {
+        eyeScale: 50, eyeSpacing: 50, eyePosX: 50, eyePosY: 50, eyePosZ: 50,
+        eyeRotX: 50, eyeRotY: 50, eyeRotZ: 50, eyeOpacity: 100,
+      };
+      document.querySelectorAll('.eye-slider').forEach(slider => {
+        const pName = slider.closest('.slider-control')?.dataset.param;
+        const val = eyeParamDefaults[pName] ?? 50;
+        slider.value = val;
+        const vd = slider.closest('.slider-control')?.querySelector('.slider-value');
+        if (vd) vd.textContent = String(val);
+      });
+
+      this.caseManager.updateAppearance('eyeParams', this.eyeSystem.getParams());
+      this.addHistory('Reset eye positioning');
+    });
+  }
+
+  // ─── Eyelash Controls ────────────────────────────────────────────────────
+
+  bindEyelashControls() {
+    // Eyelash param sliders
+    document.querySelectorAll('.eyelash-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const valueDisplay = control?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onPointerDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified eyelash ${param}`);
+      };
+
+      const onPointerUp = () => {
+        if (isDragging) {
+          if (this.eyeSystem) {
+            this.caseManager.updateAppearance('eyelashParams', this.eyeSystem.getEyelashParams());
+          }
+          this.caseManager.endAction();
+          this.addHistory(`Changed ${this.formatParamName(param)}`);
+          isDragging = false;
+          document.removeEventListener('pointerup', onPointerUp);
+        }
+      };
+
+      slider.addEventListener('pointerdown', () => {
+        onPointerDown();
+        document.addEventListener('pointerup', onPointerUp);
+      });
+
+      slider.addEventListener('pointerup', onPointerUp);
+
+      slider.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value, 10);
+        if (valueDisplay) valueDisplay.textContent = value;
+        if (!this.eyeSystem || !param || !param.startsWith('eyelash')) return;
+
+        const key = param.replace('eyelash', '');
+        const lashKey = key.charAt(0).toLowerCase() + key.slice(1);
+        this.eyeSystem.setEyelashParam(lashKey, value);
+      });
+    });
+
+    // Eyelash color presets
+    document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        this.caseManager.pushState('Changed eyelash color');
+        document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        const color = swatch.dataset.color;
+        if (this.eyeSystem) this.eyeSystem.setEyelashColor(color);
+        document.getElementById('eyelashColorPicker').value = color;
+        this.addHistory('Changed eyelash color');
+      });
+    });
+
+    // Eyelash color picker
+    const lashColorPicker = document.getElementById('eyelashColorPicker');
+    if (lashColorPicker) {
+      lashColorPicker.addEventListener('mousedown', () => {
+        this.caseManager.beginAction('Changed eyelash color');
+      });
+      lashColorPicker.addEventListener('input', (e) => {
+        if (this.eyeSystem) this.eyeSystem.setEyelashColor(e.target.value);
+        document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+      });
+      lashColorPicker.addEventListener('change', () => {
+        this.caseManager.endAction();
+        this.addHistory('Changed eyelash color');
+      });
+    }
+
+    // Reset eyelashes button
+    document.getElementById('btnResetEyelashes')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset eyelashes');
+      if (!this.eyeSystem) return;
+
+      const defaults = {
+        scale: 59, posX: 51, posY: 47, posZ: 15,
+        rotX: 50, rotY: 50, rotZ: 50, curl: 50, thickness: 65,
+        length: 50, opacity: 95,
+      };
+      Object.entries(defaults).forEach(([key, val]) => this.eyeSystem.setEyelashParam(key, val));
+      this.eyeSystem.setEyelashColor('#0a0a0a');
+
+      const paramToDefault = {
+        eyelashScale: 59, eyelashPosX: 51, eyelashPosY: 47, eyelashPosZ: 15,
+        eyelashRotX: 50, eyelashRotY: 50, eyelashRotZ: 50, eyelashCurl: 50, eyelashThickness: 65,
+        eyelashLength: 50, eyelashOpacity: 95,
+      };
+      document.querySelectorAll('.eyelash-slider').forEach(slider => {
+        const param = slider.closest('.slider-control')?.dataset.param;
+        const val = paramToDefault[param] ?? 50;
+        slider.value = val;
+        const vd = slider.closest('.slider-control')?.querySelector('.slider-value');
+        if (vd) vd.textContent = String(val);
+      });
+
+      const picker = document.getElementById('eyelashColorPicker');
+      if (picker) picker.value = '#0a0a0a';
+      document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(s => {
+        s.classList.toggle('active', s.dataset.color === '#0a0a0a');
+      });
+
+      this.addHistory('Reset eyelashes');
+    });
+  }
+
+  // ─── Glasses Controls ────────────────────────────────────────────────────
+
+  bindGlassesControls() {
+    const glasses = this.glassesSystem;
+    if (!glasses) return;
+
+    const visibleToggle = document.getElementById('glassesVisibleToggle');
+    const frameColorPicker = document.getElementById('glassesFrameColorPicker');
+    const lensColorPicker = document.getElementById('glassesLensColorPicker');
+    const lensOpacitySlider = document.getElementById('glassesLensOpacitySlider');
+    const scaleSlider = document.getElementById('glassesScaleSlider');
+    const lensScaleSlider = document.getElementById('glassesLensScaleSlider');
+    const armSplaySlider = document.getElementById('glassesArmSplaySlider');
+    const armLengthSlider = document.getElementById('glassesArmLengthSlider');
+    const posXSlider = document.getElementById('glassesPosXSlider');
+    const posYSlider = document.getElementById('glassesPosYSlider');
+    const posZSlider = document.getElementById('glassesPosZSlider');
+    const rotXSlider = document.getElementById('glassesRotXSlider');
+    const rotYSlider = document.getElementById('glassesRotYSlider');
+    const rotZSlider = document.getElementById('glassesRotZSlider');
+
+    const persistGlassesState = () => {
+      this.caseManager.updateAppearance('glasses', glasses.exportState());
+    };
+
+    // Style cards: "none" disables, any other style enables and loads that GLB.
+    document.querySelectorAll('#glassesStyleGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const style = card.dataset.glassesStyle;
+        this.caseManager.beginAction(`Glasses style: ${style}`);
+
+        document.querySelectorAll('#glassesStyleGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        if (style === 'none') {
+          glasses.setEnabled(false);
+        } else {
+          glasses.setStyle(style);
+          glasses.setEnabled(true);
+          // setStyle may have applied per-style default params — push them
+          // back onto the sliders so the UI reflects the new pose.
+          this._syncGlassesUI(glasses.exportState());
+        }
+        if (visibleToggle) visibleToggle.checked = glasses.enabled;
+
+        persistGlassesState();
+        this.caseManager.endAction();
+        this.addHistory(`Glasses: ${style}`);
+      });
+    });
+
+    // Visibility checkbox
+    visibleToggle?.addEventListener('change', (e) => {
+      this.caseManager.beginAction('Toggle glasses visibility');
+      glasses.setEnabled(!!e.target.checked);
+
+      // Sync style cards: "none" wins when disabled, otherwise current style
+      document.querySelectorAll('#glassesStyleGrid .hair-style-card').forEach(c => {
+        const cardStyle = c.dataset.glassesStyle;
+        const isActive = glasses.enabled
+          ? cardStyle === glasses.currentStyle
+          : cardStyle === 'none';
+        c.classList.toggle('active', isActive);
+      });
+
+      persistGlassesState();
+      this.caseManager.endAction();
+      this.addHistory(glasses.enabled ? 'Glasses on' : 'Glasses off');
+    });
+
+    // Frame color picker (live drag preview, commit on change)
+    {
+      let capturing = false;
+      frameColorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed glasses frame color');
+          capturing = true;
+        }
+        glasses.setFrameColor(e.target.value);
+      });
+      frameColorPicker?.addEventListener('change', () => {
+        persistGlassesState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed glasses frame color');
+      });
+    }
+
+    // Lens color picker
+    {
+      let capturing = false;
+      lensColorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed glasses lens color');
+          capturing = true;
+        }
+        glasses.setLensColor(e.target.value);
+      });
+      lensColorPicker?.addEventListener('change', () => {
+        persistGlassesState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed glasses lens color');
+      });
+    }
+
+    // Generic slider wiring for glasses (lens opacity, scale, pos XYZ, rot XYZ)
+    const sliderMap = [
+      { el: lensOpacitySlider, paramKey: 'lensOpacity', label: 'lens opacity', setter: (v) => glasses.setLensOpacity(v) },
+      { el: scaleSlider,       paramKey: 'scale',       label: 'scale',        setter: (v) => glasses.setParam('scale', v) },
+      { el: lensScaleSlider,   paramKey: 'lensScale',   label: 'lens scale',   setter: (v) => glasses.setParam('lensScale', v) },
+      { el: armSplaySlider,    paramKey: 'armSplay',    label: 'arm splay',    setter: (v) => glasses.setParam('armSplay', v) },
+      { el: armLengthSlider,   paramKey: 'armLength',   label: 'arm length',   setter: (v) => glasses.setParam('armLength', v) },
+      { el: posXSlider,        paramKey: 'posX',        label: 'horizontal',   setter: (v) => glasses.setParam('posX', v) },
+      { el: posYSlider,        paramKey: 'posY',        label: 'vertical',     setter: (v) => glasses.setParam('posY', v) },
+      { el: posZSlider,        paramKey: 'posZ',        label: 'depth',        setter: (v) => glasses.setParam('posZ', v) },
+      { el: rotXSlider,        paramKey: 'rotX',        label: 'pitch',        setter: (v) => glasses.setParam('rotX', v) },
+      { el: rotYSlider,        paramKey: 'rotY',        label: 'yaw',          setter: (v) => glasses.setParam('rotY', v) },
+      { el: rotZSlider,        paramKey: 'rotZ',        label: 'roll',         setter: (v) => glasses.setParam('rotZ', v) },
+    ];
+
+    sliderMap.forEach(({ el, paramKey, label, setter }) => {
+      if (!el) return;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified glasses ${paramKey}`);
+      };
+      const onInput = (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        setter(value);
+        this.updateSliderFill(e.target);
+      };
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        persistGlassesState();
+        this.caseManager.endAction();
+        // Delay reset so the 'change' event (which fires synchronously after mouseup)
+        // still sees isDragging=true and skips its redundant pushState call.
+        setTimeout(() => { isDragging = false; }, 0);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      el.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      el.addEventListener('input', onInput);
+      el.addEventListener('mouseup', onMouseUp);
+
+      // For non-mouse interactions (keyboard arrows, etc.)
+      el.addEventListener('change', () => {
+        if (!isDragging) {
+          this.caseManager.pushState(`Changed glasses ${label}`);
+          persistGlassesState();
+          this.addHistory(`Changed glasses ${label}`);
+        }
+      });
+    });
+
+    // Reset button
+    document.getElementById('btnResetGlasses')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset glasses');
+
+      const defaults = {
+        enabled: false,
+        style: 'glasses1',
+        frameColor: '#1a1a1a',
+        lensColor: '#88ccff',
+        lensOpacity: 20,
+        scale: 100,
+        lensScale: 100,
+        armSplay: 0,
+        armLength: 100,
+        posX: 0,
+        posY: 0,
+        posZ: 0,
+        rotX: 0,
+        rotY: 0,
+        rotZ: 0,
+      };
+      glasses.loadState(defaults);
+      this._syncGlassesUI(defaults);
+      persistGlassesState();
+      this.addHistory('Reset glasses');
+    });
+  }
+
+  /**
+   * Push glasses state into the DOM controls. Used after reset and when
+   * restoring from snapshots / loaded cases.
+   */
+  _syncGlassesUI(state) {
+    if (!state) return;
+    const visibleToggle = document.getElementById('glassesVisibleToggle');
+    const frameColorPicker = document.getElementById('glassesFrameColorPicker');
+    const lensColorPicker = document.getElementById('glassesLensColorPicker');
+
+    if (visibleToggle) visibleToggle.checked = !!state.enabled;
+    if (frameColorPicker && state.frameColor) frameColorPicker.value = state.frameColor;
+    if (lensColorPicker && state.lensColor) lensColorPicker.value = state.lensColor;
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('glassesLensOpacitySlider', state.lensOpacity);
+    setSlider('glassesScaleSlider', state.scale);
+    setSlider('glassesLensScaleSlider', state.lensScale);
+    setSlider('glassesArmSplaySlider', state.armSplay);
+    setSlider('glassesArmLengthSlider', state.armLength);
+    setSlider('glassesPosXSlider', state.posX);
+    setSlider('glassesPosYSlider', state.posY);
+    setSlider('glassesPosZSlider', state.posZ);
+    setSlider('glassesRotXSlider', state.rotX);
+    setSlider('glassesRotYSlider', state.rotY);
+    setSlider('glassesRotZSlider', state.rotZ ?? state.rotation);
+
+    // Update style cards
+    const activeStyle = state.enabled ? (state.style || 'glasses1') : 'none';
+    document.querySelectorAll('#glassesStyleGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.glassesStyle === activeStyle);
+    });
+  }
+
+  // ─── Face Mask Controls ──────────────────────────────────────────────────
+
+  bindFaceMaskControls() {
+    const mask = this.faceMaskSystem;
+    if (!mask) return;
+
+    const visibleToggle = document.getElementById('faceMaskVisibleToggle');
+    const maskColorPicker = document.getElementById('faceMaskColorPicker');
+    const strapColorPicker = document.getElementById('faceMaskStrapColorPicker');
+    const opacitySlider = document.getElementById('faceMaskOpacitySlider');
+    const scaleSlider = document.getElementById('faceMaskScaleSlider');
+    const widthSlider = document.getElementById('faceMaskWidthSlider');
+    const coverageSlider = document.getElementById('faceMaskCoverageSlider');
+    // Ear loops are tuned per side. "L"/"R" are the subject's left and right.
+    const strapScaleLSlider = document.getElementById('faceMaskStrapScaleLSlider');
+    const strapAngleLSlider = document.getElementById('faceMaskStrapAngleLSlider');
+    const strapSplayLSlider = document.getElementById('faceMaskStrapSplayLSlider');
+    const strapScaleRSlider = document.getElementById('faceMaskStrapScaleRSlider');
+    const strapAngleRSlider = document.getElementById('faceMaskStrapAngleRSlider');
+    const strapSplayRSlider = document.getElementById('faceMaskStrapSplayRSlider');
+    const posXSlider = document.getElementById('faceMaskPosXSlider');
+    const posYSlider = document.getElementById('faceMaskPosYSlider');
+    const posZSlider = document.getElementById('faceMaskPosZSlider');
+    const rotXSlider = document.getElementById('faceMaskRotXSlider');
+    const rotYSlider = document.getElementById('faceMaskRotYSlider');
+    const rotZSlider = document.getElementById('faceMaskRotZSlider');
+
+    const persistFaceMaskState = () => {
+      this.caseManager.updateAppearance('faceMask', mask.exportState());
+    };
+
+    // Style cards: "none" disables, any other style enables and loads that OBJ.
+    document.querySelectorAll('#faceMaskStyleGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const style = card.dataset.facemaskStyle;
+        this.caseManager.beginAction(`Face mask style: ${style}`);
+
+        document.querySelectorAll('#faceMaskStyleGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        if (style === 'none') {
+          mask.setEnabled(false);
+        } else {
+          this._dropOtherFaceCovering('faceMask');
+          mask.setStyle(style);
+          mask.setEnabled(true);
+          // setStyle may have applied per-style default params — push them
+          // back onto the sliders so the UI reflects the new pose.
+          this._syncFaceMaskUI(mask.exportState());
+        }
+        if (visibleToggle) visibleToggle.checked = mask.enabled;
+
+        persistFaceMaskState();
+        this.caseManager.endAction();
+        this.addHistory(`Face mask: ${style}`);
+      });
+    });
+
+    // Visibility checkbox
+    visibleToggle?.addEventListener('change', (e) => {
+      this.caseManager.beginAction('Toggle face mask visibility');
+      if (e.target.checked) this._dropOtherFaceCovering('faceMask');
+      mask.setEnabled(!!e.target.checked);
+
+      document.querySelectorAll('#faceMaskStyleGrid .hair-style-card').forEach(c => {
+        const cardStyle = c.dataset.facemaskStyle;
+        const isActive = mask.enabled
+          ? cardStyle === mask.currentStyle
+          : cardStyle === 'none';
+        c.classList.toggle('active', isActive);
+      });
+
+      persistFaceMaskState();
+      this.caseManager.endAction();
+      this.addHistory(mask.enabled ? 'Face mask on' : 'Face mask off');
+    });
+
+    // Mask color picker (live drag preview, commit on change)
+    {
+      let capturing = false;
+      maskColorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed face mask color');
+          capturing = true;
+        }
+        mask.setMaskColor(e.target.value);
+      });
+      maskColorPicker?.addEventListener('change', () => {
+        persistFaceMaskState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed face mask color');
+      });
+    }
+
+    // Strap color picker
+    {
+      let capturing = false;
+      strapColorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed face mask strap color');
+          capturing = true;
+        }
+        mask.setStrapColor(e.target.value);
+      });
+      strapColorPicker?.addEventListener('change', () => {
+        persistFaceMaskState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed face mask strap color');
+      });
+    }
+
+    // Generic slider wiring for the face mask
+    const sliderMap = [
+      { el: opacitySlider,    paramKey: 'opacity',    label: 'opacity',      setter: (v) => mask.setOpacity(v) },
+      { el: scaleSlider,      paramKey: 'scale',      label: 'scale',        setter: (v) => mask.setParam('scale', v) },
+      { el: widthSlider,      paramKey: 'width',      label: 'width',        setter: (v) => mask.setParam('width', v) },
+      { el: coverageSlider,   paramKey: 'coverage',   label: 'coverage',     setter: (v) => mask.setParam('coverage', v) },
+      { el: strapScaleLSlider, paramKey: 'strapScaleL', label: 'left strap length',  setter: (v) => mask.setParam('strapScaleL', v) },
+      { el: strapAngleLSlider, paramKey: 'strapAngleL', label: 'left strap angle',   setter: (v) => mask.setParam('strapAngleL', v) },
+      { el: strapSplayLSlider, paramKey: 'strapSplayL', label: 'left strap splay',   setter: (v) => mask.setParam('strapSplayL', v) },
+      { el: strapScaleRSlider, paramKey: 'strapScaleR', label: 'right strap length', setter: (v) => mask.setParam('strapScaleR', v) },
+      { el: strapAngleRSlider, paramKey: 'strapAngleR', label: 'right strap angle',  setter: (v) => mask.setParam('strapAngleR', v) },
+      { el: strapSplayRSlider, paramKey: 'strapSplayR', label: 'right strap splay',  setter: (v) => mask.setParam('strapSplayR', v) },
+      { el: posXSlider,       paramKey: 'posX',       label: 'horizontal',   setter: (v) => mask.setParam('posX', v) },
+      { el: posYSlider,       paramKey: 'posY',       label: 'vertical',     setter: (v) => mask.setParam('posY', v) },
+      { el: posZSlider,       paramKey: 'posZ',       label: 'depth',        setter: (v) => mask.setParam('posZ', v) },
+      { el: rotXSlider,       paramKey: 'rotX',       label: 'pitch',        setter: (v) => mask.setParam('rotX', v) },
+      { el: rotYSlider,       paramKey: 'rotY',       label: 'yaw',          setter: (v) => mask.setParam('rotY', v) },
+      { el: rotZSlider,       paramKey: 'rotZ',       label: 'roll',         setter: (v) => mask.setParam('rotZ', v) },
+    ];
+
+    sliderMap.forEach(({ el, paramKey, label, setter }) => {
+      if (!el) return;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified face mask ${paramKey}`);
+      };
+      const onInput = (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        setter(value);
+        this.updateSliderFill(e.target);
+      };
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        persistFaceMaskState();
+        this.caseManager.endAction();
+        // Delay reset so the 'change' event (which fires synchronously after mouseup)
+        // still sees isDragging=true and skips its redundant pushState call.
+        setTimeout(() => { isDragging = false; }, 0);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      el.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      el.addEventListener('input', onInput);
+      el.addEventListener('mouseup', onMouseUp);
+
+      // For non-mouse interactions (keyboard arrows, etc.)
+      el.addEventListener('change', () => {
+        if (!isDragging) {
+          this.caseManager.pushState(`Changed face mask ${label}`);
+          persistFaceMaskState();
+          this.addHistory(`Changed face mask ${label}`);
+        }
+      });
+    });
+
+    // Reset button
+    document.getElementById('btnResetFaceMask')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset face mask');
+
+      // Reset to the active style's tuned fit, not a flat neutral pose.
+      const defaults = mask.getStyleDefaults(mask.currentStyle);
+      mask.loadState(defaults);
+      this._syncFaceMaskUI(defaults);
+      persistFaceMaskState();
+      this.addHistory('Reset face mask');
+    });
+
+    // Push the seeded per-style defaults onto the controls so the panel agrees
+    // with what enabling the mask will actually render. Without this the
+    // sliders keep the static values written in index.html.
+    this._syncFaceMaskUI(mask.exportState());
+  }
+
+  /**
+   * Push face mask state into the DOM controls. Used after reset and when
+   * restoring from snapshots / loaded cases.
+   */
+  _syncFaceMaskUI(state) {
+    if (!state) return;
+    const visibleToggle = document.getElementById('faceMaskVisibleToggle');
+    const maskColorPicker = document.getElementById('faceMaskColorPicker');
+    const strapColorPicker = document.getElementById('faceMaskStrapColorPicker');
+
+    if (visibleToggle) visibleToggle.checked = !!state.enabled;
+    if (maskColorPicker && state.maskColor) maskColorPicker.value = state.maskColor;
+    if (strapColorPicker && state.strapColor) strapColorPicker.value = state.strapColor;
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('faceMaskOpacitySlider', state.opacity);
+    setSlider('faceMaskScaleSlider', state.scale);
+    setSlider('faceMaskWidthSlider', state.width);
+    setSlider('faceMaskCoverageSlider', state.coverage);
+    // `?? state.strapX` keeps cases saved before the per-side split in sync.
+    setSlider('faceMaskStrapScaleLSlider', state.strapScaleL ?? state.strapScale);
+    setSlider('faceMaskStrapAngleLSlider', state.strapAngleL ?? state.strapAngle);
+    setSlider('faceMaskStrapSplayLSlider', state.strapSplayL ?? state.strapSplay);
+    setSlider('faceMaskStrapScaleRSlider', state.strapScaleR ?? state.strapScale);
+    setSlider('faceMaskStrapAngleRSlider', state.strapAngleR ?? state.strapAngle);
+    setSlider('faceMaskStrapSplayRSlider', state.strapSplayR ?? state.strapSplay);
+    setSlider('faceMaskPosXSlider', state.posX);
+    setSlider('faceMaskPosYSlider', state.posY);
+    setSlider('faceMaskPosZSlider', state.posZ);
+    setSlider('faceMaskRotXSlider', state.rotX);
+    setSlider('faceMaskRotYSlider', state.rotY);
+    setSlider('faceMaskRotZSlider', state.rotZ);
+
+    // Update style cards
+    const activeStyle = state.enabled ? (state.style || 'mask1') : 'none';
+    document.querySelectorAll('#faceMaskStyleGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.facemaskStyle === activeStyle);
+    });
+  }
+
+  // ─── Earring Controls ────────────────────────────────────────────────────
+
+  bindEarringControls() {
+    const earrings = this.earringSystem;
+    if (!earrings) return;
+
+    const visibleToggle = document.getElementById('earringVisibleToggle');
+    const colorPicker = document.getElementById('earringColorPicker');
+
+    const persistEarringState = () => {
+      this.caseManager.updateAppearance('earrings', earrings.exportState());
+    };
+
+    // Style cards: "none" disables, any other style enables that piece.
+    document.querySelectorAll('#earringStyleGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const style = card.dataset.earringStyle;
+        this.caseManager.beginAction(`Earring style: ${style}`);
+
+        document.querySelectorAll('#earringStyleGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        if (style === 'none') {
+          earrings.setEnabled(false);
+        } else {
+          earrings.setStyle(style);
+          earrings.setEnabled(true);
+          // setStyle may have applied per-style default params — push them back
+          // onto the sliders so the UI reflects the new pose.
+          this._syncEarringUI(earrings.exportState());
+        }
+        if (visibleToggle) visibleToggle.checked = earrings.enabled;
+
+        persistEarringState();
+        this.caseManager.endAction();
+        this.addHistory(`Earrings: ${style}`);
+      });
+    });
+
+    // Side cards: both / left only / right only.
+    document.querySelectorAll('#earringSideGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const side = card.dataset.earringSide;
+        this.caseManager.beginAction(`Earring side: ${side}`);
+
+        document.querySelectorAll('#earringSideGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        earrings.setSideMode(side);
+        persistEarringState();
+        this.caseManager.endAction();
+        this.addHistory(`Earrings worn on: ${side}`);
+      });
+    });
+
+    // Metal preset swatches — write through the picker so both stay in sync.
+    document.querySelectorAll('#earringMetalPresets .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const hex = card.dataset.earringMetal;
+        if (!hex) return;
+        this.caseManager.beginAction('Changed earring metal');
+
+        document.querySelectorAll('#earringMetalPresets .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        earrings.setMetalColor(hex);
+        if (colorPicker) colorPicker.value = hex;
+
+        persistEarringState();
+        this.caseManager.endAction();
+        this.addHistory('Changed earring metal');
+      });
+    });
+
+    // Visibility checkbox
+    visibleToggle?.addEventListener('change', (e) => {
+      this.caseManager.beginAction('Toggle earring visibility');
+      earrings.setEnabled(!!e.target.checked);
+
+      document.querySelectorAll('#earringStyleGrid .hair-style-card').forEach(c => {
+        const cardStyle = c.dataset.earringStyle;
+        const isActive = earrings.enabled
+          ? cardStyle === earrings.currentStyle
+          : cardStyle === 'none';
+        c.classList.toggle('active', isActive);
+      });
+
+      persistEarringState();
+      this.caseManager.endAction();
+      this.addHistory(earrings.enabled ? 'Earrings on' : 'Earrings off');
+    });
+
+    // Metal color picker (live drag preview, commit on change)
+    {
+      let capturing = false;
+      colorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed earring metal color');
+          capturing = true;
+        }
+        earrings.setMetalColor(e.target.value);
+      });
+      colorPicker?.addEventListener('change', () => {
+        // A custom colour no longer matches any preset swatch.
+        document.querySelectorAll('#earringMetalPresets .hair-style-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.earringMetal === earrings.metalColor);
+        });
+        persistEarringState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed earring metal color');
+      });
+    }
+
+    // Generic slider wiring for the earrings
+    const sliderMap = [
+      { id: 'earringPolishSlider', paramKey: 'polish', label: 'polish',      setter: (v) => earrings.setPolish(v) },
+      { id: 'earringSizeSlider',   paramKey: 'size',   label: 'size',        setter: (v) => earrings.setParam('size', v) },
+      { id: 'earringPosXSlider',   paramKey: 'posX',   label: 'out/in',      setter: (v) => earrings.setParam('posX', v) },
+      { id: 'earringPosYSlider',   paramKey: 'posY',   label: 'height',      setter: (v) => earrings.setParam('posY', v) },
+      { id: 'earringPosZSlider',   paramKey: 'posZ',   label: 'depth',       setter: (v) => earrings.setParam('posZ', v) },
+      { id: 'earringTiltLSlider',  paramKey: 'tiltL',  label: 'left tilt',   setter: (v) => earrings.setParam('tiltL', v) },
+      { id: 'earringSplayLSlider', paramKey: 'splayL', label: 'left splay',  setter: (v) => earrings.setParam('splayL', v) },
+      { id: 'earringDropLSlider',  paramKey: 'dropL',  label: 'left hang',   setter: (v) => earrings.setParam('dropL', v) },
+      { id: 'earringTiltRSlider',  paramKey: 'tiltR',  label: 'right tilt',  setter: (v) => earrings.setParam('tiltR', v) },
+      { id: 'earringSplayRSlider', paramKey: 'splayR', label: 'right splay', setter: (v) => earrings.setParam('splayR', v) },
+      { id: 'earringDropRSlider',  paramKey: 'dropR',  label: 'right hang',  setter: (v) => earrings.setParam('dropR', v) },
+      { id: 'earringSpinLSlider',  paramKey: 'spinL',  label: 'left spin',   setter: (v) => earrings.setParam('spinL', v) },
+      { id: 'earringSpinRSlider',  paramKey: 'spinR',  label: 'right spin',  setter: (v) => earrings.setParam('spinR', v) },
+    ];
+
+    sliderMap.forEach(({ id, paramKey, label, setter }) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified earring ${paramKey}`);
+      };
+      const onInput = (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        setter(value);
+        this.updateSliderFill(e.target);
+      };
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        persistEarringState();
+        this.caseManager.endAction();
+        // Delay reset so the 'change' event (which fires synchronously after mouseup)
+        // still sees isDragging=true and skips its redundant pushState call.
+        setTimeout(() => { isDragging = false; }, 0);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      el.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      el.addEventListener('input', onInput);
+      el.addEventListener('mouseup', onMouseUp);
+
+      // For non-mouse interactions (keyboard arrows, etc.)
+      el.addEventListener('change', () => {
+        if (!isDragging) {
+          this.caseManager.pushState(`Changed earring ${label}`);
+          persistEarringState();
+          this.addHistory(`Changed earring ${label}`);
+        }
+      });
+    });
+
+    // Reset button
+    document.getElementById('btnResetEarrings')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset earrings');
+
+      const defaults = earrings.getStyleDefaults(earrings.currentStyle);
+      earrings.loadState(defaults);
+      this._syncEarringUI(defaults);
+      persistEarringState();
+      this.addHistory('Reset earrings');
+    });
+
+    // Push the seeded per-style defaults onto the controls so the panel agrees
+    // with what enabling the earrings will actually render.
+    this._syncEarringUI(earrings.exportState());
+  }
+
+  /**
+   * Push earring state into the DOM controls. Used after reset and when
+   * restoring from snapshots / loaded cases.
+   */
+  _syncEarringUI(state) {
+    if (!state) return;
+    const visibleToggle = document.getElementById('earringVisibleToggle');
+    const colorPicker = document.getElementById('earringColorPicker');
+
+    if (visibleToggle) visibleToggle.checked = !!state.enabled;
+    if (colorPicker && state.metalColor) colorPicker.value = state.metalColor;
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('earringPolishSlider', state.polish);
+    setSlider('earringSizeSlider', state.size);
+    setSlider('earringPosXSlider', state.posX);
+    setSlider('earringPosYSlider', state.posY);
+    setSlider('earringPosZSlider', state.posZ);
+    setSlider('earringTiltLSlider', state.tiltL);
+    setSlider('earringSplayLSlider', state.splayL);
+    setSlider('earringDropLSlider', state.dropL);
+    setSlider('earringTiltRSlider', state.tiltR);
+    setSlider('earringSplayRSlider', state.splayR);
+    setSlider('earringDropRSlider', state.dropR);
+    setSlider('earringSpinLSlider', state.spinL);
+    setSlider('earringSpinRSlider', state.spinR);
+
+    // Update style cards
+    const activeStyle = state.enabled ? (state.style || 'hoop') : 'none';
+    document.querySelectorAll('#earringStyleGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.earringStyle === activeStyle);
+    });
+
+    // Update side cards
+    const activeSide = state.sideMode || 'both';
+    document.querySelectorAll('#earringSideGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.earringSide === activeSide);
+    });
+
+    // Update metal preset swatches
+    document.querySelectorAll('#earringMetalPresets .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.earringMetal === state.metalColor);
+    });
+  }
+
+  // ─── Bandana Controls ────────────────────────────────────────────────────
+
+  /**
+   * A bandana and a face mask both cover the lower face, so wearing both at
+   * once just renders one through the other. Turning either on drops the
+   * other, and the panel is kept in step.
+   */
+  _dropOtherFaceCovering(keep) {
+    if (keep !== 'bandana' && this.bandanaSystem && this.bandanaSystem.enabled) {
+      this.bandanaSystem.setEnabled(false);
+      this._syncBandanaUI(this.bandanaSystem.exportState());
+      this.caseManager.updateAppearance('bandana', this.bandanaSystem.exportState());
+    }
+    if (keep !== 'faceMask' && this.faceMaskSystem && this.faceMaskSystem.enabled) {
+      this.faceMaskSystem.setEnabled(false);
+      this._syncFaceMaskUI(this.faceMaskSystem.exportState());
+      this.caseManager.updateAppearance('faceMask', this.faceMaskSystem.exportState());
+    }
+  }
+
+  bindBandanaControls() {
+    const bandana = this.bandanaSystem;
+    if (!bandana) return;
+
+    const visibleToggle = document.getElementById('bandanaVisibleToggle');
+    const tintPicker = document.getElementById('bandanaTintPicker');
+
+    const persistBandanaState = () => {
+      this.caseManager.updateAppearance('bandana', bandana.exportState());
+    };
+
+    // Style cards: "none" disables, any other style enables that model.
+    document.querySelectorAll('#bandanaStyleGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const style = card.dataset.bandanaStyle;
+        this.caseManager.beginAction(`Bandana style: ${style}`);
+
+        document.querySelectorAll('#bandanaStyleGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        if (style === 'none') {
+          bandana.setEnabled(false);
+        } else {
+          this._dropOtherFaceCovering('bandana');
+          bandana.setStyle(style);
+          bandana.setEnabled(true);
+          this._syncBandanaUI(bandana.exportState());
+        }
+        if (visibleToggle) visibleToggle.checked = bandana.enabled;
+
+        persistBandanaState();
+        this.caseManager.endAction();
+        this.addHistory(`Bandana: ${style}`);
+      });
+    });
+
+    // Tint presets — write through the picker so both stay in sync.
+    document.querySelectorAll('#bandanaTintPresets .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const hex = card.dataset.bandanaTint;
+        if (!hex) return;
+        this.caseManager.beginAction('Changed bandana colour');
+
+        document.querySelectorAll('#bandanaTintPresets .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+
+        bandana.setTint(hex);
+        if (tintPicker) tintPicker.value = hex;
+
+        persistBandanaState();
+        this.caseManager.endAction();
+        this.addHistory('Changed bandana colour');
+      });
+    });
+
+    // Visibility checkbox
+    visibleToggle?.addEventListener('change', (e) => {
+      this.caseManager.beginAction('Toggle bandana visibility');
+      if (e.target.checked) this._dropOtherFaceCovering('bandana');
+      bandana.setEnabled(!!e.target.checked);
+
+      document.querySelectorAll('#bandanaStyleGrid .hair-style-card').forEach(c => {
+        const cardStyle = c.dataset.bandanaStyle;
+        const isActive = bandana.enabled
+          ? cardStyle === bandana.currentStyle
+          : cardStyle === 'none';
+        c.classList.toggle('active', isActive);
+      });
+
+      persistBandanaState();
+      this.caseManager.endAction();
+      this.addHistory(bandana.enabled ? 'Bandana on' : 'Bandana off');
+    });
+
+    // Tint picker (live drag preview, commit on change)
+    {
+      let capturing = false;
+      tintPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed bandana colour');
+          capturing = true;
+        }
+        bandana.setTint(e.target.value);
+      });
+      tintPicker?.addEventListener('change', () => {
+        document.querySelectorAll('#bandanaTintPresets .hair-style-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.bandanaTint === bandana.tint);
+        });
+        persistBandanaState();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed bandana colour');
+      });
+    }
+
+    // Generic slider wiring for the bandana
+    const sliderMap = [
+      { id: 'bandanaOpacitySlider', paramKey: 'opacity', label: 'opacity',    setter: (v) => bandana.setOpacity(v) },
+      { id: 'bandanaScaleSlider',   paramKey: 'scale',   label: 'scale',      setter: (v) => bandana.setParam('scale', v) },
+      { id: 'bandanaWidthSlider',   paramKey: 'width',   label: 'wrap width', setter: (v) => bandana.setParam('width', v) },
+      { id: 'bandanaDepthSlider',   paramKey: 'depth',   label: 'side depth', setter: (v) => bandana.setParam('depth', v) },
+      { id: 'bandanaHemFlareSlider', paramKey: 'hemFlare', label: 'bottom flare', setter: (v) => bandana.setParam('hemFlare', v) },
+      { id: 'bandanaPosXSlider',    paramKey: 'posX',    label: 'horizontal', setter: (v) => bandana.setParam('posX', v) },
+      { id: 'bandanaPosYSlider',    paramKey: 'posY',    label: 'vertical',   setter: (v) => bandana.setParam('posY', v) },
+      { id: 'bandanaPosZSlider',    paramKey: 'posZ',    label: 'depth',      setter: (v) => bandana.setParam('posZ', v) },
+      { id: 'bandanaRotXSlider',    paramKey: 'rotX',    label: 'pitch',      setter: (v) => bandana.setParam('rotX', v) },
+      { id: 'bandanaRotYSlider',    paramKey: 'rotY',    label: 'yaw',        setter: (v) => bandana.setParam('rotY', v) },
+      { id: 'bandanaRotZSlider',    paramKey: 'rotZ',    label: 'roll',       setter: (v) => bandana.setParam('rotZ', v) },
+    ];
+
+    sliderMap.forEach(({ id, paramKey, label, setter }) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseDown = () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified bandana ${paramKey}`);
+      };
+      const onInput = (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        setter(value);
+        this.updateSliderFill(e.target);
+      };
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        persistBandanaState();
+        this.caseManager.endAction();
+        // Delay reset so the 'change' event (which fires synchronously after mouseup)
+        // still sees isDragging=true and skips its redundant pushState call.
+        setTimeout(() => { isDragging = false; }, 0);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      el.addEventListener('mousedown', () => {
+        onMouseDown();
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      el.addEventListener('input', onInput);
+      el.addEventListener('mouseup', onMouseUp);
+
+      // For non-mouse interactions (keyboard arrows, etc.)
+      el.addEventListener('change', () => {
+        if (!isDragging) {
+          this.caseManager.pushState(`Changed bandana ${label}`);
+          persistBandanaState();
+          this.addHistory(`Changed bandana ${label}`);
+        }
+      });
+    });
+
+    // Reset button
+    document.getElementById('btnResetBandana')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset bandana');
+
+      const defaults = bandana.getStyleDefaults(bandana.currentStyle);
+      bandana.loadState(defaults);
+      this._syncBandanaUI(defaults);
+      persistBandanaState();
+      this.addHistory('Reset bandana');
+    });
+
+    this._syncBandanaUI(bandana.exportState());
+  }
+
+  /**
+   * Push bandana state into the DOM controls. Used after reset and when
+   * restoring from snapshots / loaded cases.
+   */
+  _syncBandanaUI(state) {
+    if (!state) return;
+    const visibleToggle = document.getElementById('bandanaVisibleToggle');
+    const tintPicker = document.getElementById('bandanaTintPicker');
+
+    if (visibleToggle) visibleToggle.checked = !!state.enabled;
+    if (tintPicker && state.tint) tintPicker.value = state.tint;
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('bandanaOpacitySlider', state.opacity);
+    setSlider('bandanaScaleSlider', state.scale);
+    setSlider('bandanaWidthSlider', state.width);
+    setSlider('bandanaDepthSlider', state.depth);
+    setSlider('bandanaHemFlareSlider', state.hemFlare);
+    setSlider('bandanaPosXSlider', state.posX);
+    setSlider('bandanaPosYSlider', state.posY);
+    setSlider('bandanaPosZSlider', state.posZ);
+    setSlider('bandanaRotXSlider', state.rotX);
+    setSlider('bandanaRotYSlider', state.rotY);
+    setSlider('bandanaRotZSlider', state.rotZ);
+
+    const activeStyle = state.enabled ? (state.style || 'paisley') : 'none';
+    document.querySelectorAll('#bandanaStyleGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.bandanaStyle === activeStyle);
+    });
+
+    document.querySelectorAll('#bandanaTintPresets .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.bandanaTint === state.tint);
+    });
+  }
+
+  // ─── Eyebrow Piercing Controls ───────────────────────────────────────────
+
+  bindBrowRingControls() {
+    const brow = this.browPiercingSystem;
+    if (!brow) return;
+
+    const visibleToggle = document.getElementById('browRingVisibleToggle');
+    const colorPicker = document.getElementById('browRingColorPicker');
+
+    const persist = () => {
+      this.caseManager.updateAppearance('browPiercing', brow.exportState());
+    };
+
+    visibleToggle?.addEventListener('change', (e) => {
+      this.caseManager.beginAction('Toggle eyebrow piercing');
+      brow.setEnabled(!!e.target.checked);
+      persist();
+      this.caseManager.endAction();
+      this.addHistory(brow.enabled ? 'Eyebrow piercing on' : 'Eyebrow piercing off');
+    });
+
+    document.querySelectorAll('#browRingSideGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const side = card.dataset.browringSide;
+        this.caseManager.beginAction(`Eyebrow piercing side: ${side}`);
+        document.querySelectorAll('#browRingSideGrid .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        brow.setSideMode(side);
+        persist();
+        this.caseManager.endAction();
+        this.addHistory(`Eyebrow piercing worn on: ${side}`);
+      });
+    });
+
+    document.querySelectorAll('#browRingMetalPresets .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const hex = card.dataset.browringMetal;
+        if (!hex) return;
+        this.caseManager.beginAction('Changed eyebrow piercing metal');
+        document.querySelectorAll('#browRingMetalPresets .hair-style-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        brow.setMetalColor(hex);
+        if (colorPicker) colorPicker.value = hex;
+        persist();
+        this.caseManager.endAction();
+        this.addHistory('Changed eyebrow piercing metal');
+      });
+    });
+
+    {
+      let capturing = false;
+      colorPicker?.addEventListener('input', (e) => {
+        if (!capturing) {
+          this.caseManager.beginAction('Changed eyebrow piercing metal colour');
+          capturing = true;
+        }
+        brow.setMetalColor(e.target.value);
+      });
+      colorPicker?.addEventListener('change', () => {
+        document.querySelectorAll('#browRingMetalPresets .hair-style-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.browringMetal === brow.metalColor);
+        });
+        persist();
+        this.caseManager.endAction();
+        capturing = false;
+        this.addHistory('Changed eyebrow piercing metal colour');
+      });
+    }
+
+    const sliderMap = [
+      { id: 'browRingPolishSlider', paramKey: 'polish',    label: 'polish',      setter: (v) => brow.setPolish(v) },
+      { id: 'browRingSizeSlider',   paramKey: 'size',      label: 'size',        setter: (v) => brow.setParam('size', v) },
+      { id: 'browRingAlongSlider',  paramKey: 'alongBrow', label: 'brow position', setter: (v) => brow.setParam('alongBrow', v) },
+      { id: 'browRingPosXSlider',   paramKey: 'posX',      label: 'out/in',      setter: (v) => brow.setParam('posX', v) },
+      { id: 'browRingPosYSlider',   paramKey: 'posY',      label: 'height',      setter: (v) => brow.setParam('posY', v) },
+      { id: 'browRingPosZSlider',   paramKey: 'posZ',      label: 'depth',       setter: (v) => brow.setParam('posZ', v) },
+      { id: 'browRingYawLSlider',   paramKey: 'yawL',      label: 'left angle',  setter: (v) => brow.setParam('yawL', v) },
+      { id: 'browRingSpinLSlider',  paramKey: 'spinL',     label: 'left spin',   setter: (v) => brow.setParam('spinL', v) },
+      { id: 'browRingYawRSlider',   paramKey: 'yawR',      label: 'right angle', setter: (v) => brow.setParam('yawR', v) },
+      { id: 'browRingSpinRSlider',  paramKey: 'spinR',     label: 'right spin',  setter: (v) => brow.setParam('spinR', v) },
+    ];
+
+    sliderMap.forEach(({ id, paramKey, label, setter }) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      let isDragging = false;
+
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        persist();
+        this.caseManager.endAction();
+        setTimeout(() => { isDragging = false; }, 0);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+
+      el.addEventListener('mousedown', () => {
+        isDragging = true;
+        this.caseManager.beginAction(`Modified eyebrow piercing ${paramKey}`);
+        document.addEventListener('mouseup', onMouseUp);
+      });
+      el.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        setter(value);
+        this.updateSliderFill(e.target);
+      });
+      el.addEventListener('mouseup', onMouseUp);
+      el.addEventListener('change', () => {
+        if (!isDragging) {
+          this.caseManager.pushState(`Changed eyebrow piercing ${label}`);
+          persist();
+          this.addHistory(`Changed eyebrow piercing ${label}`);
+        }
+      });
+    });
+
+    document.getElementById('btnResetBrowRing')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Reset eyebrow piercing');
+      const defaults = brow.getDefaults();
+      brow.loadState(defaults);
+      this._syncBrowRingUI(defaults);
+      persist();
+      this.addHistory('Reset eyebrow piercing');
+    });
+
+    this._syncBrowRingUI(brow.exportState());
+  }
+
+  /** Push eyebrow piercing state into the DOM controls. */
+  _syncBrowRingUI(state) {
+    if (!state) return;
+    const toggle = document.getElementById('browRingVisibleToggle');
+    const colorPicker = document.getElementById('browRingColorPicker');
+    if (toggle) toggle.checked = !!state.enabled;
+    if (colorPicker && state.metalColor) colorPicker.value = state.metalColor;
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('browRingPolishSlider', state.polish);
+    setSlider('browRingSizeSlider', state.size);
+    setSlider('browRingAlongSlider', state.alongBrow);
+    setSlider('browRingPosXSlider', state.posX);
+    setSlider('browRingPosYSlider', state.posY);
+    setSlider('browRingPosZSlider', state.posZ);
+    setSlider('browRingYawLSlider', state.yawL);
+    setSlider('browRingSpinLSlider', state.spinL);
+    setSlider('browRingYawRSlider', state.yawR);
+    setSlider('browRingSpinRSlider', state.spinR);
+
+    const activeSide = state.sideMode || 'both';
+    document.querySelectorAll('#browRingSideGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.browringSide === activeSide);
+    });
+    document.querySelectorAll('#browRingMetalPresets .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.browringMetal === state.metalColor);
+    });
+  }
+
+  // ─── Reference Photo Overlay ─────────────────────────────────────────────
+
+  bindReferenceControls() {
+    const ref = this.referenceOverlay;
+    if (!ref) return;
+
+    const fileInput = document.getElementById('referenceFileInput');
+    const visibleToggle = document.getElementById('referenceVisibleToggle');
+    const flipToggle = document.getElementById('referenceFlipToggle');
+    const toolbarBtn = document.getElementById('rf-vp-reference');
+
+    // Load a photo. Read as a data URL so it works the same whether the app is
+    // packaged or running from source, with no temp files to clean up.
+    document.getElementById('btnLoadReference')?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        ref.setImage(reader.result, file.name);
+        this._syncReferenceUI();
+        this.addHistory(`Reference photo loaded: ${file.name}`);
+      };
+      reader.onerror = () => this.showNotification('Could not read that image', 'error');
+      reader.readAsDataURL(file);
+      // Clear so picking the same file again still fires a change event.
+      e.target.value = '';
+    });
+
+    document.getElementById('btnClearReference')?.addEventListener('click', () => {
+      ref.clear();
+      this._syncReferenceUI();
+      this.addHistory('Reference photo removed');
+    });
+
+    visibleToggle?.addEventListener('change', (e) => {
+      ref.setEnabled(!!e.target.checked);
+      this._syncReferenceUI();
+    });
+
+    // Quick show/hide from the viewport, since that is the action you repeat
+    // constantly while comparing.
+    toolbarBtn?.addEventListener('click', () => {
+      if (!ref.hasImage) {
+        this.showNotification('Load a reference photo in the Case tab first', 'info');
+        return;
+      }
+      ref.toggle();
+      this._syncReferenceUI();
+    });
+
+    document.querySelectorAll('#referenceModeGrid .hair-style-card').forEach(card => {
+      card.addEventListener('click', () => {
+        ref.setMode(card.dataset.referenceMode);
+        this._syncReferenceUI();
+      });
+    });
+
+    flipToggle?.addEventListener('change', (e) => {
+      ref.setFlipped(!!e.target.checked);
+    });
+
+    // Alignment sliders. These are plain live updates — the overlay is a
+    // viewing aid, so it deliberately stays out of undo/redo and the case
+    // history rather than filling them with alignment noise.
+    const sliders = [
+      ['referenceOpacitySlider', 'opacity'],
+      ['referenceWipeSlider', 'wipe'],
+      ['referenceScaleSlider', 'scale'],
+      ['referencePosXSlider', 'posX'],
+      ['referencePosYSlider', 'posY'],
+      ['referenceRotateSlider', 'rotate'],
+    ];
+    for (const [id, key] of sliders) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      el.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        if (valueDisplay) valueDisplay.textContent = String(value);
+        ref.setParam(key, value);
+        this.updateSliderFill(e.target);
+      });
+    }
+
+    document.getElementById('btnResetReference')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      ref.resetTransform();
+      this._syncReferenceUI();
+      this.addHistory('Reference alignment reset');
+    });
+
+    this._syncReferenceUI();
+  }
+
+  /** Push overlay state into the panel and the viewport toggle. */
+  _syncReferenceUI() {
+    const ref = this.referenceOverlay;
+    if (!ref) return;
+    const state = ref.getState();
+
+    const toggle = document.getElementById('referenceVisibleToggle');
+    if (toggle) {
+      toggle.checked = state.enabled;
+      toggle.disabled = !state.hasImage;
+    }
+    const clearBtn = document.getElementById('btnClearReference');
+    if (clearBtn) clearBtn.disabled = !state.hasImage;
+
+    const flip = document.getElementById('referenceFlipToggle');
+    if (flip) flip.checked = state.flipped;
+
+    // Thumbnail / empty placeholder
+    const thumbWrap = document.getElementById('referenceThumbWrap');
+    const empty = document.getElementById('referenceEmpty');
+    const thumb = document.getElementById('referenceThumb');
+    const nameEl = document.getElementById('referenceName');
+    if (thumbWrap && empty) {
+      thumbWrap.style.display = state.hasImage ? 'block' : 'none';
+      empty.style.display = state.hasImage ? 'none' : 'block';
+    }
+    if (thumb && state.hasImage && ref.img?.src) thumb.src = ref.img.src;
+    if (nameEl) nameEl.textContent = state.imageName || '';
+
+    // Wipe position only matters in wipe mode.
+    const wipeControl = document.getElementById('referenceWipeControl');
+    if (wipeControl) wipeControl.style.display = state.mode === 'wipe' ? '' : 'none';
+
+    document.querySelectorAll('#referenceModeGrid .hair-style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.referenceMode === state.mode);
+    });
+
+    const setSlider = (id, value) => {
+      const el = document.getElementById(id);
+      if (!el || value === undefined) return;
+      el.value = value;
+      const vd = el.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(value);
+      this.updateSliderFill(el);
+    };
+    setSlider('referenceOpacitySlider', state.opacity);
+    setSlider('referenceWipeSlider', state.wipe);
+    setSlider('referenceScaleSlider', state.scale);
+    setSlider('referencePosXSlider', state.posX);
+    setSlider('referencePosYSlider', state.posY);
+    setSlider('referenceRotateSlider', state.rotate);
+
+    const toolbarBtn = document.getElementById('rf-vp-reference');
+    if (toolbarBtn) toolbarBtn.classList.toggle('active', state.enabled);
+  }
+
+  // ─── Turntable Clip ──────────────────────────────────────────────────────
+
+  bindTurntableControls() {
+    const rec = this.turntableRecorder;
+    if (!rec) return;
+
+    const btn = document.getElementById('btnRecordTurntable');
+    const status = document.getElementById('turntableStatus');
+
+    const readOptions = () => ({
+      duration: +(document.getElementById('turntableDurationSlider')?.value || 6),
+      degrees: +(document.getElementById('turntableDegreesSlider')?.value || 360),
+      elevation: +(document.getElementById('turntableElevationSlider')?.value || 0),
+      fps: +(document.getElementById('turntableFpsSlider')?.value || 30),
+    });
+
+    const setStatus = (text, kind) => {
+      if (!status) return;
+      status.style.display = text ? '' : 'none';
+      status.textContent = text || '';
+      status.className = 'rf-turntable-status' + (kind ? ' ' + kind : '');
+    };
+
+    // Plain live sliders — these are export settings, not part of the
+    // reconstruction, so they stay out of undo/redo and the case history.
+    for (const id of ['turntableDurationSlider', 'turntableDegreesSlider',
+                      'turntableElevationSlider', 'turntableFpsSlider']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const valueDisplay = el.closest('.slider-control')?.querySelector('.slider-value');
+      el.addEventListener('input', (e) => {
+        if (valueDisplay) valueDisplay.textContent = String(e.target.value);
+        this.updateSliderFill(e.target);
+      });
+      this.updateSliderFill(el);
+    }
+
+    btn?.addEventListener('click', async () => {
+      if (rec.recording) return;
+      if (!TurntableRecorder.isSupported()) {
+        setStatus('Video capture is not available in this build', 'error');
+        return;
+      }
+
+      const opts = readOptions();
+      btn.disabled = true;
+      setStatus('Recording… 0%');
+      rec.onProgress = (t) => setStatus(`Recording… ${Math.round(t * 100)}%`);
+
+      try {
+        const { blob, seconds, fps } = await rec.record(opts);
+        rec.onProgress = null;
+        setStatus('Saving…');
+
+        const buffer = await blob.arrayBuffer();
+        const base64 = this._arrayBufferToBase64(buffer);
+        const sizeMb = (blob.size / (1024 * 1024)).toFixed(1);
+
+        if (window.electronAPI) {
+          const result = await window.electronAPI.saveDialog({
+            title: 'Save Turntable Clip',
+            defaultPath: `nishaan_turntable_${Date.now()}.webm`,
+            filters: [{ name: 'WebM Video', extensions: ['webm'] }],
+          });
+          if (result.canceled || !result.filePath) {
+            setStatus('');
+            this.addHistory('Turntable cancelled');
+            return;
+          }
+          await window.electronAPI.saveFile(result.filePath, base64);
+        } else {
+          const link = document.createElement('a');
+          link.download = `nishaan_turntable_${Date.now()}.webm`;
+          link.href = URL.createObjectURL(blob);
+          link.click();
+          URL.revokeObjectURL(link.href);
+        }
+
+        setStatus(`Saved — ${seconds}s at ${fps}fps, ${sizeMb} MB`, 'done');
+        this.addHistory('Turntable clip exported');
+      } catch (err) {
+        rec.onProgress = null;
+        console.error('[Turntable]', err);
+        setStatus(`Recording failed: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  /**
+   * Chunked so a multi-megabyte clip does not blow the argument limit that
+   * String.fromCharCode(...bytes) hits on large buffers.
+   */
+  _arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const CHUNK = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+
+  // ─── Witness Variant Picker ──────────────────────────────────────────────
+
+  bindVariantPickerControls() {
+    const picker = this.variantPicker;
+    if (!picker) return;
+
+    const modal = document.getElementById('rf-variant-modal');
+    const grid = document.getElementById('rf-variant-grid');
+    const status = document.getElementById('rf-variant-status');
+    const hint = document.getElementById('rf-variant-hint');
+    const acceptBtn = document.getElementById('rf-variant-accept');
+    const noneBtn = document.getElementById('rf-variant-none');
+
+    picker.onUpdate = () => this._renderVariantGrid();
+
+    document.getElementById('btnStartVariantPicker')?.addEventListener('click', async () => {
+      const description = (document.getElementById('aiChatInput')?.value || '').trim();
+      const refs = this.aiController?.referenceImages || [];
+      if (!description && refs.length === 0) {
+        this.showNotification('Describe the face first, or attach a reference photo', 'info');
+        return;
+      }
+
+      modal.style.display = 'flex';
+      grid.innerHTML = '';
+      if (status) status.textContent = 'Generating candidates…';
+      if (hint) hint.textContent = '';
+      if (acceptBtn) acceptBtn.disabled = true;
+
+      // The face is about to be overwritten repeatedly for thumbnails, so put
+      // a restore point in before anything moves.
+      this.caseManager.pushState('Witness variant session');
+
+      try {
+        await picker.start(description, refs);
+        this.addHistory('Variant picker: opened');
+      } catch (err) {
+        if (status) status.textContent = '';
+        modal.style.display = 'none';
+        picker.cancel();
+        this.showNotification(`Could not generate candidates: ${err.message}`, 'error');
+      }
+    });
+
+    noneBtn?.addEventListener('click', async () => {
+      if (status) status.textContent = 'Generating a different set…';
+      grid.innerHTML = '';
+      if (acceptBtn) acceptBtn.disabled = true;
+      try {
+        await picker.rejectAll();
+        this.addHistory('Variant picker: rejected a set');
+      } catch (err) {
+        this.showNotification(`Could not generate candidates: ${err.message}`, 'error');
+        this._renderVariantGrid();
+      }
+    });
+
+    acceptBtn?.addEventListener('click', () => {
+      const chosen = picker.apply(picker.selectedIndex);
+      modal.style.display = 'none';
+      if (chosen) {
+        this._syncSliders?.();
+        this.updatePropertyPanel?.();
+        this.caseManager.updateMorphTargets(this.morpher.morphValues);
+        this.addHistory(`Variant picker: accepted "${chosen.label}"`);
+        this.showNotification('Face applied — refine it with the sliders', 'success');
+      }
+    });
+
+    document.getElementById('rf-variant-cancel')?.addEventListener('click', () => {
+      picker.cancel();
+      modal.style.display = 'none';
+      this._syncSliders?.();
+      this.addHistory('Variant picker: cancelled');
+    });
+  }
+
+  /** Paint the candidate grid and the round/convergence messaging. */
+  _renderVariantGrid() {
+    const picker = this.variantPicker;
+    const grid = document.getElementById('rf-variant-grid');
+    const status = document.getElementById('rf-variant-status');
+    const hint = document.getElementById('rf-variant-hint');
+    const acceptBtn = document.getElementById('rf-variant-accept');
+    const title = document.getElementById('rf-variant-title');
+    if (!picker || !grid) return;
+
+    const state = picker.getState();
+    grid.innerHTML = '';
+
+    state.variants.forEach((v, i) => {
+      const card = document.createElement('div');
+      card.className = 'rf-variant-card' + (picker.selectedIndex === i ? ' selected' : '');
+
+      if (v.thumb) {
+        const img = document.createElement('img');
+        img.src = v.thumb;
+        img.alt = v.label;
+        card.appendChild(img);
+      }
+      // Round 1+ keeps the previous pick in slot 0 so a good face can never be
+      // lost by choosing it; call that out rather than leaving it a surprise.
+      if (state.round > 0 && i === 0) {
+        const badge = document.createElement('div');
+        badge.className = 'rf-variant-badge';
+        badge.textContent = 'Your pick';
+        card.appendChild(badge);
+      }
+      const label = document.createElement('div');
+      label.className = 'rf-variant-label';
+      label.textContent = v.label;
+      card.appendChild(label);
+
+      card.addEventListener('click', () => {
+        picker.selectedIndex = i;
+        this._renderVariantGrid();
+        if (acceptBtn) acceptBtn.disabled = false;
+      });
+      card.addEventListener('dblclick', () => this._advanceVariantRound(i));
+
+      grid.appendChild(card);
+    });
+
+    if (title) {
+      title.textContent = state.round === 0 ? 'Which is closest?' : 'Closer — which of these?';
+    }
+    if (status) {
+      status.textContent = state.round === 0
+        ? 'Round 1 · pick the nearest face, or say none of these look right'
+        : `Round ${state.round + 1} · variations around your last pick — no AI requests used`;
+    }
+    if (hint) {
+      hint.textContent = picker.selectedIndex < 0
+        ? 'Click a face to select it. Double-click to refine around it.'
+        : (state.canNarrow
+          ? 'Double-click it to narrow further, or use it as-is.'
+          : 'As close as this will get — use it and fine-tune with the sliders.');
+    }
+    if (acceptBtn) acceptBtn.disabled = picker.selectedIndex < 0;
+  }
+
+  _advanceVariantRound(index) {
+    const picker = this.variantPicker;
+    const status = document.getElementById('rf-variant-status');
+    if (status) status.textContent = 'Building variations…';
+    const narrowed = picker.pick(index);
+    if (!narrowed) {
+      // Converged — pick() has already applied the face.
+      document.getElementById('rf-variant-modal').style.display = 'none';
+      this._syncSliders?.();
+      this.updatePropertyPanel?.();
+      this.caseManager.updateMorphTargets(this.morpher.morphValues);
+      this.addHistory('Variant picker: converged');
+      this.showNotification('Face applied — refine it with the sliders', 'success');
+    }
+  }
+
+  // ─── Skin Mark Controls ──────────────────────────────────────────────────
+
+  bindSkinMarkControls() {
+    const skinMarks = this.skinMarkSystem;
+    if (!skinMarks) return;
+
+    const btnToggle = document.getElementById('btnToggleSkinMarks');
+    const btnToolbar = document.getElementById('btnSkinMarks');
+
+    const toggleSkinMarks = () => {
+      // Disable point editor if active (mutual exclusion)
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+        const btnPE = document.getElementById('btnTogglePointEdit');
+        if (btnPE) {
+          btnPE.classList.remove('active');
+          btnPE.innerHTML = '<i class="fas fa-hand-pointer"></i> Enable Point Editing';
+        }
+      }
+      // Disable wrinkle painter if active (mutual exclusion)
+      if (this.wrinklePainter && this.wrinklePainter.enabled) {
+        this.wrinklePainter.disable();
+        document.getElementById('btnWrinklePaint')?.classList.remove('active');
+        const btnWP = document.getElementById('btnToggleWrinklePaint');
+        if (btnWP) {
+          btnWP.classList.remove('active');
+          btnWP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting';
+        }
+      }
+      // Disable lip painter if active (mutual exclusion)
+      if (this.lipPainter && this.lipPainter.enabled) {
+        this.lipPainter.disable();
+        document.getElementById('btnLipPaint')?.classList.remove('active');
+        const btnLP = document.getElementById('btnToggleLipPaint');
+        if (btnLP) {
+          btnLP.classList.remove('active');
+          btnLP.innerHTML = '<i class="fas fa-pen"></i> Enable Lip Pen';
+        }
+      }
+      // Disable pigmentation painter if active (mutual exclusion)
+      if (this.pigmentationPainter && this.pigmentationPainter.enabled) {
+        this.pigmentationPainter.disable();
+        document.getElementById('btnPigmentPaint')?.classList.remove('active');
+        const btnPP = document.getElementById('btnTogglePigmentPaint');
+        if (btnPP) {
+          btnPP.classList.remove('active');
+          btnPP.innerHTML = '<i class="fas fa-tint"></i> Enable Pigmentation Pen';
+        }
+      }
+      // Disable decal system if active (mutual exclusion)
+      if (this.decalSystem && this.decalSystem.enabled) {
+        this.decalSystem.disable();
+        document.getElementById('btnDecals')?.classList.remove('active');
+        const btnDC = document.getElementById('btnToggleDecalPlace');
+        if (btnDC) {
+          btnDC.classList.remove('active');
+          btnDC.innerHTML = '<i class="fas fa-crosshairs"></i> Place on Face';
+        }
+      }
+      if (this.hairTintPainter && this.hairTintPainter.enabled) {
+        this.hairTintPainter.disable();
+        const btnHTP = document.getElementById('btnToggleHairTintPaint');
+        if (btnHTP) {
+          btnHTP.classList.remove('active');
+          btnHTP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+        }
+      }
+
+      const active = skinMarks.toggle();
+      btnToggle?.classList.toggle('active', active);
+      btnToolbar?.classList.toggle('active', active);
+      if (btnToggle) {
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Mark Placement'
+          : '<i class="fas fa-crosshairs"></i> Enable Mark Placement';
+      }
+      this.addHistory(active ? 'Skin mark placement enabled' : 'Skin mark placement disabled');
+    };
+
+    btnToggle?.addEventListener('click', toggleSkinMarks);
+    btnToolbar?.addEventListener('click', toggleSkinMarks);
+
+    // Mark type selector
+    document.getElementById('skinMarkType')?.addEventListener('change', (e) => {
+      skinMarks.activeMarkType = e.target.value;
+      const typeDef = SkinMarkSystem.MARK_TYPES[e.target.value];
+      if (typeDef) {
+        document.getElementById('skinMarkColor').value = typeDef.defaultColor;
+      }
+    });
+
+    // Placement size slider (controls size of newly placed marks)
+    {
+      const placementSlider = document.getElementById('skinMarkPlacementSize');
+      const placementValue = document.getElementById('skinMarkPlacementSizeValue');
+
+      const updatePlacementSize = () => {
+        const sizeNorm = parseInt(placementSlider.value) / 100;
+        const actualSize = 0.001 + sizeNorm * 0.149;
+        skinMarks.placementSize = actualSize;
+        placementValue.textContent = actualSize.toFixed(3);
+      };
+
+      placementSlider?.addEventListener('input', updatePlacementSize);
+
+      // Update default display based on current mark type
+      const updatePlacementDefault = () => {
+        const typeDef = SkinMarkSystem.MARK_TYPES[skinMarks.activeMarkType];
+        if (typeDef && placementSlider) {
+          const sliderVal = Math.round(((typeDef.defaultSize - 0.001) / 0.149) * 100);
+          placementSlider.value = sliderVal;
+          skinMarks.placementSize = typeDef.defaultSize;
+          if (placementValue) placementValue.textContent = typeDef.defaultSize.toFixed(3);
+        }
+      };
+
+      // Reset placement size when mark type changes
+      document.getElementById('skinMarkType')?.addEventListener('change', updatePlacementDefault);
+
+      // Initialize with current type default
+      updatePlacementDefault();
+    }
+
+    // Size slider (for selected marks)
+    {
+      const sizeSlider = document.getElementById('skinMarkSize');
+      let isDraggingSize = false;
+
+      const onSizeMouseUp = () => {
+        if (isDraggingSize) {
+          this.caseManager.endAction();
+          isDraggingSize = false;
+          document.removeEventListener('mouseup', onSizeMouseUp);
+        }
+      };
+
+      sizeSlider?.addEventListener('mousedown', () => {
+        isDraggingSize = true;
+        this.caseManager.beginAction('Modified skin mark size');
+        document.addEventListener('mouseup', onSizeMouseUp);
+      });
+
+      sizeSlider?.addEventListener('input', (e) => {
+        const sizeNorm = parseInt(e.target.value) / 100;
+        const actualSize = 0.001 + sizeNorm * 0.149;
+        skinMarks.updateSelectedMark('size', actualSize);
+        document.getElementById('skinMarkSizeValue').textContent = actualSize.toFixed(3);
+      });
+    }
+
+    // Rotation slider
+    {
+      const rotSlider = document.getElementById('skinMarkRotation');
+      let isDraggingRot = false;
+
+      const onRotMouseUp = () => {
+        if (isDraggingRot) {
+          this.caseManager.endAction();
+          isDraggingRot = false;
+          document.removeEventListener('mouseup', onRotMouseUp);
+        }
+      };
+
+      rotSlider?.addEventListener('mousedown', () => {
+        isDraggingRot = true;
+        this.caseManager.beginAction('Modified skin mark rotation');
+        document.addEventListener('mouseup', onRotMouseUp);
+      });
+
+      rotSlider?.addEventListener('input', (e) => {
+        const degrees = parseInt(e.target.value);
+        const radians = (degrees * Math.PI) / 180;
+        skinMarks.updateSelectedMark('rotation', radians);
+        document.getElementById('skinMarkRotationValue').textContent = degrees + '\u00B0';
+      });
+    }
+
+    // Color picker
+    {
+      let _markColorCapturing = false;
+      const markColorPicker = document.getElementById('skinMarkColor');
+      markColorPicker?.addEventListener('input', (e) => {
+        if (!_markColorCapturing) {
+          this.caseManager.beginAction('Modified skin mark color');
+          _markColorCapturing = true;
+        }
+        skinMarks.updateSelectedMark('color', e.target.value);
+      });
+      markColorPicker?.addEventListener('change', () => {
+        this.caseManager.endAction();
+        _markColorCapturing = false;
+      });
+    }
+
+    // Delete button
+    document.getElementById('btnDeleteMark')?.addEventListener('click', () => {
+      this.caseManager.pushState('Deleted skin mark');
+      skinMarks.deleteSelectedMark();
+      this.addHistory('Deleted skin mark');
+    });
+
+    // Clear all marks
+    document.getElementById('btnClearAllMarks')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.pushState('Cleared all skin marks');
+      skinMarks.clearAll();
+      this.addHistory('Cleared all skin marks');
+    });
+
+    // Callback: save undo state when a mark is placed
+    skinMarks.onMarkPlaced = (markData) => {
+      this.caseManager.pushState(`Placed ${markData.type}`);
+      this.addHistory(`Placed ${markData.type}`);
+    };
+
+    // Callback: update UI when marks change
+    skinMarks.onMarkChanged = () => {
+      const count = skinMarks.getMarkCount();
+      const countEl = document.getElementById('skinMarkCount');
+      if (countEl) countEl.textContent = count;
+      const propEl = document.getElementById('currentSkinMarkCount');
+      if (propEl) propEl.textContent = count;
+
+      // Show/hide selected-mark properties sub-group
+      const propsGroup = document.getElementById('skinMarkPropertiesGroup');
+      if (propsGroup) {
+        propsGroup.style.display = skinMarks.selectedMarkIndex >= 0 ? 'block' : 'none';
+      }
+
+      // Update property controls to reflect selected mark
+      if (skinMarks.selectedMarkIndex >= 0) {
+        const mark = skinMarks.marks[skinMarks.selectedMarkIndex];
+        const sizeSlider = document.getElementById('skinMarkSize');
+        const sizeValue = document.getElementById('skinMarkSizeValue');
+        const rotSlider = document.getElementById('skinMarkRotation');
+        const rotValue = document.getElementById('skinMarkRotationValue');
+        const colorPicker = document.getElementById('skinMarkColor');
+
+        if (sizeSlider) sizeSlider.value = Math.round(((mark.size - 0.001) / 0.149) * 100);
+        if (sizeValue) sizeValue.textContent = mark.size.toFixed(3);
+        if (rotSlider) rotSlider.value = Math.round((mark.rotation * 180) / Math.PI);
+        if (rotValue) rotValue.textContent = Math.round((mark.rotation * 180) / Math.PI) + '\u00B0';
+        if (colorPicker) colorPicker.value = mark.color;
+      }
+
+      this.caseManager.updateSkinMarks(skinMarks.exportState());
+      this.updatePropertyPanel();
+    };
+  }
+
+  // ─── Decal System Controls ────────────────────────────────────────────
+
+  bindDecalControls() {
+    const decals = this.decalSystem;
+    if (!decals) return;
+
+    const btnToggle = document.getElementById('btnToggleDecalPlace');
+    const btnToolbar = document.getElementById('btnDecals');
+    const fileInput = document.getElementById('decalFileInput');
+    const btnUpload = document.getElementById('btnUploadDecalTexture');
+    const gallery = document.getElementById('decalTextureGallery');
+
+    // ── Toggle placement mode ──
+    const toggleDecalMode = () => {
+      // Disable point editor if active (mutual exclusion)
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+        const btnPE = document.getElementById('btnTogglePointEdit');
+        if (btnPE) {
+          btnPE.classList.remove('active');
+          btnPE.innerHTML = '<i class="fas fa-hand-pointer"></i> Enable Point Editing';
+        }
+      }
+      // Disable skin marks if active (mutual exclusion)
+      if (this.skinMarkSystem && this.skinMarkSystem.enabled) {
+        this.skinMarkSystem.disable();
+        document.getElementById('btnSkinMarks')?.classList.remove('active');
+        const btnSM = document.getElementById('btnToggleSkinMarks');
+        if (btnSM) {
+          btnSM.classList.remove('active');
+          btnSM.innerHTML = '<i class="fas fa-crosshairs"></i> Enable Mark Placement';
+        }
+      }
+      // Disable wrinkle painter if active (mutual exclusion)
+      if (this.wrinklePainter && this.wrinklePainter.enabled) {
+        this.wrinklePainter.disable();
+        document.getElementById('btnWrinklePaint')?.classList.remove('active');
+        const btnWP = document.getElementById('btnToggleWrinklePaint');
+        if (btnWP) {
+          btnWP.classList.remove('active');
+          btnWP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting';
+        }
+      }
+      // Disable lip painter if active (mutual exclusion)
+      if (this.lipPainter && this.lipPainter.enabled) {
+        this.lipPainter.disable();
+        document.getElementById('btnLipPaint')?.classList.remove('active');
+        const btnLP = document.getElementById('btnToggleLipPaint');
+        if (btnLP) {
+          btnLP.classList.remove('active');
+          btnLP.innerHTML = '<i class="fas fa-pen"></i> Enable Lip Pen';
+        }
+      }
+      // Disable pigmentation painter if active (mutual exclusion)
+      if (this.pigmentationPainter && this.pigmentationPainter.enabled) {
+        this.pigmentationPainter.disable();
+        document.getElementById('btnPigmentPaint')?.classList.remove('active');
+        const btnPP = document.getElementById('btnTogglePigmentPaint');
+        if (btnPP) {
+          btnPP.classList.remove('active');
+          btnPP.innerHTML = '<i class="fas fa-tint"></i> Enable Pigmentation Pen';
+        }
+      }
+      if (this.hairTintPainter && this.hairTintPainter.enabled) {
+        this.hairTintPainter.disable();
+        const btnHTP = document.getElementById('btnToggleHairTintPaint');
+        if (btnHTP) {
+          btnHTP.classList.remove('active');
+          btnHTP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+        }
+      }
+
+      const active = decals.toggle();
+      btnToggle?.classList.toggle('active', active);
+      btnToolbar?.classList.toggle('active', active);
+      if (btnToggle) {
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Placement'
+          : '<i class="fas fa-crosshairs"></i> Place on Face';
+      }
+      this.addHistory(active ? 'Decal placement enabled' : 'Decal placement disabled');
+    };
+
+    btnToggle?.addEventListener('click', toggleDecalMode);
+    btnToolbar?.addEventListener('click', toggleDecalMode);
+
+    // ── Upload texture ──
+    btnUpload?.addEventListener('click', () => {
+      fileInput?.click();
+    });
+
+    fileInput?.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const entry = await decals.uploadTexture(file);
+      if (entry) {
+        this._refreshDecalGallery();
+        this.addHistory(`Uploaded decal texture: ${file.name}`);
+      } else {
+        this.addHistory('Failed to upload decal texture (check file type/size)');
+      }
+      // Reset file input so same file can be re-uploaded
+      fileInput.value = '';
+    });
+
+    // ── Scale slider ──
+    const scaleSlider = document.getElementById('decalScale');
+    const scaleValue = document.getElementById('decalScaleValue');
+    {
+      let isDragging = false;
+      const onScaleUp = () => {
+        if (isDragging) {
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('pointerup', onScaleUp);
+        }
+      };
+      scaleSlider?.addEventListener('pointerdown', () => {
+        isDragging = true;
+        this.caseManager.beginAction('Modified decal scale');
+        document.addEventListener('pointerup', onScaleUp);
+      });
+      scaleSlider?.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value) / 100;
+        decals.updateSelectedDecal('scale', val);
+        if (scaleValue) scaleValue.textContent = val.toFixed(2) + 'x';
+      });
+    }
+
+    // ── Rotation slider ──
+    const rotSlider = document.getElementById('decalRotation');
+    const rotValue = document.getElementById('decalRotationValue');
+    {
+      let isDragging = false;
+      const onRotUp = () => {
+        if (isDragging) {
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('pointerup', onRotUp);
+        }
+      };
+      rotSlider?.addEventListener('pointerdown', () => {
+        isDragging = true;
+        this.caseManager.beginAction('Modified decal rotation');
+        document.addEventListener('pointerup', onRotUp);
+      });
+      rotSlider?.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        decals.updateSelectedDecal('rotation', val);
+        if (rotValue) rotValue.textContent = val + '\u00B0';
+      });
+    }
+
+    // ── Opacity slider ──
+    const opacitySlider = document.getElementById('decalOpacity');
+    const opacityValue = document.getElementById('decalOpacityValue');
+    {
+      let isDragging = false;
+      const onOpacityUp = () => {
+        if (isDragging) {
+          this.caseManager.endAction();
+          isDragging = false;
+          document.removeEventListener('pointerup', onOpacityUp);
+        }
+      };
+      opacitySlider?.addEventListener('pointerdown', () => {
+        isDragging = true;
+        this.caseManager.beginAction('Modified decal opacity');
+        document.addEventListener('pointerup', onOpacityUp);
+      });
+      opacitySlider?.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value);
+        decals.updateSelectedDecal('opacity', val);
+        if (opacityValue) opacityValue.textContent = val + '%';
+      });
+    }
+
+    // ── Delete selected ──
+    document.getElementById('btnDeleteDecal')?.addEventListener('click', () => {
+      this.caseManager.beginAction('Deleted decal');
+      decals.deleteSelectedDecal();
+      this.caseManager.endAction();
+      this.addHistory('Deleted selected decal');
+    });
+
+    // ── Clear all ──
+    document.getElementById('btnClearAllDecals')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.caseManager.beginAction('Cleared all decals');
+      decals.clearAll();
+      this.caseManager.endAction();
+      this.addHistory('Cleared all decals');
+    });
+
+    // ── Callback: save undo state when a decal is placed ──
+    decals.onDecalPlaced = (decalData) => {
+      this.caseManager.beginAction('Placed decal');
+      // endAction fires after onDecalChanged updates currentCase below
+      this._decalPlacePending = true;
+      this.addHistory('Placed image decal');
+    };
+
+    // ── Callback: update UI when decals change ──
+    decals.onDecalChanged = () => {
+      const count = decals.getDecalCount();
+      const countEl = document.getElementById('decalCount');
+      if (countEl) countEl.textContent = count;
+
+      // Show/hide selected-decal properties sub-group
+      const propsGroup = document.getElementById('decalPropertiesGroup');
+      if (propsGroup) {
+        propsGroup.style.display = decals.selectedDecalIndex >= 0 ? 'block' : 'none';
+      }
+
+      // Update property controls to reflect selected decal
+      if (decals.selectedDecalIndex >= 0) {
+        const d = decals.decals[decals.selectedDecalIndex];
+        if (scaleSlider) scaleSlider.value = Math.round(d.scale * 100);
+        if (scaleValue) scaleValue.textContent = d.scale.toFixed(2) + 'x';
+        if (rotSlider) rotSlider.value = d.rotation;
+        if (rotValue) rotValue.textContent = d.rotation + '\u00B0';
+        if (opacitySlider) opacitySlider.value = d.opacity;
+        if (opacityValue) opacityValue.textContent = d.opacity + '%';
+      }
+
+      this.caseManager.updateDecals(decals.exportState());
+
+      // Commit undo snapshot after place action updates currentCase
+      if (this._decalPlacePending) {
+        this.caseManager.endAction();
+        this._decalPlacePending = false;
+      }
+
+      this._refreshDecalGallery();
+      this.updatePropertyPanel();
+    };
+  }
+
+  /**
+   * Refresh the decal texture thumbnail gallery.
+   */
+  _refreshDecalGallery() {
+    const decals = this.decalSystem;
+    if (!decals) return;
+
+    const gallery = document.getElementById('decalTextureGallery');
+    if (!gallery) return;
+
+    gallery.innerHTML = '';
+    if (decals.textures.length === 0) {
+      gallery.style.display = 'none';
+      return;
+    }
+    gallery.style.display = 'grid';
+
+    for (const tex of decals.textures) {
+      const thumb = document.createElement('div');
+      thumb.className = 'decal-thumb';
+      if (tex.id === decals.activeTextureId) thumb.classList.add('active');
+      thumb.innerHTML = `<img src="${tex.thumbnail}" alt="${tex.name}" title="${tex.name}" />`;
+      thumb.addEventListener('click', () => {
+        decals.activeTextureId = tex.id;
+        gallery.querySelectorAll('.decal-thumb').forEach(t => t.classList.remove('active'));
+        thumb.classList.add('active');
+      });
+      gallery.appendChild(thumb);
+    }
+  }
+
+
+  // ─── Wrinkle Painter Controls ─────────────────────────────────────────
+
+  bindWrinklePainterControls() {
+    const painter = this.wrinklePainter;
+    if (!painter) return;
+
+    const btnToolbar = document.getElementById('btnWrinklePaint');
+    const btnToggle = document.getElementById('btnToggleWrinklePaint');
+    const btnErase = document.getElementById('btnWrinkleErase');
+    const btnUndo = document.getElementById('btnWrinkleUndo');
+    const btnClear = document.getElementById('btnWrinkleClear');
+    const sizeSlider = document.getElementById('wrinkleBrushSize');
+    const sizeValue = document.getElementById('wrinkleBrushSizeValue');
+    const strengthSlider = document.getElementById('wrinkleBrushStrength');
+    const strengthValue = document.getElementById('wrinkleBrushStrengthValue');
+
+    const togglePainter = () => {
+      // Disable other edit modes (mutual exclusion)
+      if (this.skinMarkSystem && this.skinMarkSystem.enabled) {
+        this.skinMarkSystem.disable();
+        document.getElementById('btnSkinMarks')?.classList.remove('active');
+        const btnSM = document.getElementById('btnToggleSkinMarks');
+        if (btnSM) {
+          btnSM.classList.remove('active');
+          btnSM.innerHTML = '<i class="fas fa-crosshairs"></i> Enable Mark Placement';
+        }
+      }
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+      }
+      if (this.lipPainter && this.lipPainter.enabled) {
+        this.lipPainter.disable();
+        document.getElementById('btnLipPaint')?.classList.remove('active');
+        const btnLP = document.getElementById('btnToggleLipPaint');
+        if (btnLP) {
+          btnLP.classList.remove('active');
+          btnLP.innerHTML = '<i class="fas fa-pen"></i> Enable Lip Pen';
+        }
+      }
+      if (this.decalSystem && this.decalSystem.enabled) {
+        this.decalSystem.disable();
+        document.getElementById('btnDecals')?.classList.remove('active');
+        const btnDC = document.getElementById('btnToggleDecalPlace');
+        if (btnDC) {
+          btnDC.classList.remove('active');
+          btnDC.innerHTML = '<i class="fas fa-crosshairs"></i> Place on Face';
+        }
+      }
+      if (this.pigmentationPainter && this.pigmentationPainter.enabled) {
+        this.pigmentationPainter.disable();
+        document.getElementById('btnPigmentPaint')?.classList.remove('active');
+        const btnPP = document.getElementById('btnTogglePigmentPaint');
+        if (btnPP) {
+          btnPP.classList.remove('active');
+          btnPP.innerHTML = '<i class="fas fa-tint"></i> Enable Pigmentation Pen';
+        }
+      }
+      if (this.hairTintPainter && this.hairTintPainter.enabled) {
+        this.hairTintPainter.disable();
+        const btnHTP = document.getElementById('btnToggleHairTintPaint');
+        if (btnHTP) {
+          btnHTP.classList.remove('active');
+          btnHTP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+        }
+      }
+
+      const active = painter.toggle();
+      btnToolbar?.classList.toggle('active', active);
+      if (btnToggle) {
+        btnToggle.classList.toggle('active', active);
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Wrinkle Painting'
+          : '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting';
+      }
+      this.addHistory(active ? 'Wrinkle painting enabled' : 'Wrinkle painting disabled');
+    };
+
+    btnToolbar?.addEventListener('click', togglePainter);
+    btnToggle?.addEventListener('click', togglePainter);
+
+    // Brush size
+    sizeSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushSize = v;
+      if (sizeValue) sizeValue.textContent = v;
+    });
+
+    // Brush strength
+    strengthSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushStrength = v / 100;
+      if (strengthValue) strengthValue.textContent = v;
+    });
+
+    // Eraser toggle
+    btnErase?.addEventListener('click', () => {
+      painter.eraseMode = !painter.eraseMode;
+      btnErase.classList.toggle('active', painter.eraseMode);
+    });
+
+    // Undo
+    btnUndo?.addEventListener('click', () => {
+      painter.undo();
+      this.addHistory('Undo wrinkle stroke');
+    });
+
+    // Clear
+    btnClear?.addEventListener('click', () => {
+      painter.clearAll();
+      this.addHistory('Cleared all manual wrinkles');
+    });
+
+    // Persist changes
+    painter.onChanged = () => {
+      this.caseManager.updateAppearance('wrinklePaintData', painter.exportState());
+    };
+  }
+
+  // ─── Lip Painter Controls ─────────────────────────────────────────────────
+
+  bindLipPainterControls() {
+    const painter = this.lipPainter;
+    if (!painter) return;
+
+    const btnToolbar = document.getElementById('btnLipPaint');
+    const btnToggle = document.getElementById('btnToggleLipPaint');
+    const btnErase = document.getElementById('btnLipErase');
+    const btnUndo = document.getElementById('btnLipPaintUndo');
+    const btnClear = document.getElementById('btnLipPaintClear');
+    const sizeSlider = document.getElementById('lipBrushSize');
+    const strengthSlider = document.getElementById('lipBrushStrength');
+
+    const togglePainter = () => {
+      // Disable other edit modes (mutual exclusion)
+      if (this.skinMarkSystem && this.skinMarkSystem.enabled) {
+        this.skinMarkSystem.disable();
+        document.getElementById('btnSkinMarks')?.classList.remove('active');
+      }
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+      }
+      if (this.wrinklePainter && this.wrinklePainter.enabled) {
+        this.wrinklePainter.disable();
+        document.getElementById('btnWrinklePaint')?.classList.remove('active');
+        const btnWP = document.getElementById('btnToggleWrinklePaint');
+        if (btnWP) {
+          btnWP.classList.remove('active');
+          btnWP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting';
+        }
+      }
+      if (this.decalSystem && this.decalSystem.enabled) {
+        this.decalSystem.disable();
+        document.getElementById('btnDecals')?.classList.remove('active');
+        const btnDC = document.getElementById('btnToggleDecalPlace');
+        if (btnDC) {
+          btnDC.classList.remove('active');
+          btnDC.innerHTML = '<i class="fas fa-crosshairs"></i> Place on Face';
+        }
+      }
+      if (this.pigmentationPainter && this.pigmentationPainter.enabled) {
+        this.pigmentationPainter.disable();
+        document.getElementById('btnPigmentPaint')?.classList.remove('active');
+        const btnPP = document.getElementById('btnTogglePigmentPaint');
+        if (btnPP) {
+          btnPP.classList.remove('active');
+          btnPP.innerHTML = '<i class="fas fa-tint"></i> Enable Pigmentation Pen';
+        }
+      }
+      if (this.hairTintPainter && this.hairTintPainter.enabled) {
+        this.hairTintPainter.disable();
+        const btnHTP = document.getElementById('btnToggleHairTintPaint');
+        if (btnHTP) {
+          btnHTP.classList.remove('active');
+          btnHTP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+        }
+      }
+
+      const active = painter.toggle();
+      btnToolbar?.classList.toggle('active', active);
+      if (btnToggle) {
+        btnToggle.classList.toggle('active', active);
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Lip Pen'
+          : '<i class="fas fa-pen"></i> Enable Lip Pen';
+      }
+      this.addHistory(active ? 'Lip painting enabled' : 'Lip painting disabled');
+    };
+
+    btnToolbar?.addEventListener('click', togglePainter);
+    btnToggle?.addEventListener('click', togglePainter);
+
+    // Brush size
+    sizeSlider?.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      painter.brushRadius = v / 100; // slider 1-10 maps to 0.01-0.10
+    });
+
+    // Brush strength
+    strengthSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushStrength = v / 100;
+    });
+
+    // Eraser toggle
+    btnErase?.addEventListener('click', () => {
+      painter.eraseMode = !painter.eraseMode;
+      btnErase.classList.toggle('active', painter.eraseMode);
+    });
+
+    // Undo
+    btnUndo?.addEventListener('click', () => {
+      painter.undo();
+      this.addHistory('Undo lip paint stroke');
+    });
+
+    // Clear
+    btnClear?.addEventListener('click', () => {
+      painter.clearAll();
+      this.addHistory('Cleared all manual lip paint');
+    });
+
+    // Persist changes
+    painter.onChanged = () => {
+      this.caseManager.updateAppearance('lipPaintData', painter.exportState());
+    };
+  }
+
+  // ─── Pigmentation Painter Controls ──────────────────────────────────────────
+
+  bindPigmentationPainterControls() {
+    const painter = this.pigmentationPainter;
+    if (!painter) return;
+
+    const btnToolbar = document.getElementById('btnPigmentPaint');
+    const btnToggle = document.getElementById('btnTogglePigmentPaint');
+    const btnErase = document.getElementById('btnPigmentErase');
+    const btnUndo = document.getElementById('btnPigmentUndo');
+    const btnClear = document.getElementById('btnPigmentClear');
+    const sizeSlider = document.getElementById('pigmentBrushSize');
+    const sizeValue = document.getElementById('pigmentBrushSizeValue');
+    const strengthSlider = document.getElementById('pigmentBrushStrength');
+    const strengthValue = document.getElementById('pigmentBrushStrengthValue');
+    const colorPicker = document.getElementById('pigmentColorPicker');
+
+    const togglePainter = () => {
+      // Disable other edit modes (mutual exclusion)
+      if (this.skinMarkSystem && this.skinMarkSystem.enabled) {
+        this.skinMarkSystem.disable();
+        document.getElementById('btnSkinMarks')?.classList.remove('active');
+        const btnSM = document.getElementById('btnToggleSkinMarks');
+        if (btnSM) {
+          btnSM.classList.remove('active');
+          btnSM.innerHTML = '<i class="fas fa-crosshairs"></i> Enable Mark Placement';
+        }
+      }
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+      }
+      if (this.wrinklePainter && this.wrinklePainter.enabled) {
+        this.wrinklePainter.disable();
+        document.getElementById('btnWrinklePaint')?.classList.remove('active');
+        const btnWP = document.getElementById('btnToggleWrinklePaint');
+        if (btnWP) {
+          btnWP.classList.remove('active');
+          btnWP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting';
+        }
+      }
+      if (this.lipPainter && this.lipPainter.enabled) {
+        this.lipPainter.disable();
+        document.getElementById('btnLipPaint')?.classList.remove('active');
+        const btnLP = document.getElementById('btnToggleLipPaint');
+        if (btnLP) {
+          btnLP.classList.remove('active');
+          btnLP.innerHTML = '<i class="fas fa-pen"></i> Enable Lip Pen';
+        }
+      }
+      if (this.decalSystem && this.decalSystem.enabled) {
+        this.decalSystem.disable();
+        document.getElementById('btnDecals')?.classList.remove('active');
+        const btnDC = document.getElementById('btnToggleDecalPlace');
+        if (btnDC) {
+          btnDC.classList.remove('active');
+          btnDC.innerHTML = '<i class="fas fa-crosshairs"></i> Place on Face';
+        }
+      }
+      if (this.hairTintPainter && this.hairTintPainter.enabled) {
+        this.hairTintPainter.disable();
+        const btnHTP = document.getElementById('btnToggleHairTintPaint');
+        if (btnHTP) {
+          btnHTP.classList.remove('active');
+          btnHTP.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+        }
+      }
+
+      const active = painter.toggle();
+      btnToolbar?.classList.toggle('active', active);
+      if (btnToggle) {
+        btnToggle.classList.toggle('active', active);
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Pigmentation Pen'
+          : '<i class="fas fa-tint"></i> Enable Pigmentation Pen';
+      }
+      this.addHistory(active ? 'Pigmentation painting enabled' : 'Pigmentation painting disabled');
+    };
+
+    btnToolbar?.addEventListener('click', togglePainter);
+    btnToggle?.addEventListener('click', togglePainter);
+
+    // Brush size
+    sizeSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushSize = v;
+      if (sizeValue) sizeValue.textContent = v;
+    });
+
+    // Brush strength
+    strengthSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushStrength = v / 100;
+      if (strengthValue) strengthValue.textContent = v;
+    });
+
+    // Eraser toggle
+    btnErase?.addEventListener('click', () => {
+      painter.eraseMode = !painter.eraseMode;
+      btnErase.classList.toggle('active', painter.eraseMode);
+    });
+
+    // Undo
+    btnUndo?.addEventListener('click', () => {
+      this.caseManager.pushState('Undo pigmentation stroke');
+      painter.undo();
+      this.caseManager.updateAppearance('pigmentPaintData', painter.exportState());
+      this.addHistory('Undo pigmentation stroke');
+    });
+
+    // Clear
+    btnClear?.addEventListener('click', () => {
+      this.caseManager.pushState('Clear all pigmentation');
+      painter.clearAll();
+      this.caseManager.updateAppearance('pigmentPaintData', painter.exportState());
+      this.addHistory('Cleared all pigmentation');
+    });
+
+    // Color presets
+    document.querySelectorAll('#pigmentColorPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        const color = swatch.getAttribute('data-pigment-color');
+        if (color) {
+          painter.brushColor = color;
+          if (colorPicker) colorPicker.value = color;
+          // Highlight active swatch
+          document.querySelectorAll('#pigmentColorPresets .color-swatch').forEach(s => {
+            s.style.borderColor = 'transparent';
+          });
+          swatch.style.borderColor = '#fff';
+        }
+      });
+    });
+
+    // Custom color picker
+    colorPicker?.addEventListener('input', (e) => {
+      painter.brushColor = e.target.value;
+      // Deselect preset swatches
+      document.querySelectorAll('#pigmentColorPresets .color-swatch').forEach(s => {
+        s.style.borderColor = 'transparent';
+      });
+    });
+
+    // Highlight default swatch
+    const defaultSwatch = document.querySelector('#pigmentColorPresets .color-swatch[data-pigment-color="#6B3A2A"]');
+    if (defaultSwatch) defaultSwatch.style.borderColor = '#fff';
+
+    // Persist changes and push to global undo stack
+    painter.onChanged = () => {
+      this.caseManager.pushState('Pigmentation stroke');
+      this.caseManager.updateAppearance('pigmentPaintData', painter.exportState());
+    };
+  }
+
+  // ─── Tint / Overlay Color Controls ──────────────────────────────────────
+
+  bindTintControls() {
+    // ── Helper: bind tint presets, picker, and intensity for a target ──
+    const bindTintGroup = (presetsId, pickerId, intensityId, intensityValueId, setTintColor, setTintIntensity) => {
+      // Tint preset swatches
+      document.querySelectorAll(`#${presetsId} .color-swatch`).forEach(swatch => {
+        swatch.addEventListener('click', () => {
+          this.caseManager.pushState('Changed tint color');
+          document.querySelectorAll(`#${presetsId} .color-swatch`).forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+
+          const color = swatch.dataset.color;
+          setTintColor(color);
+          const picker = document.getElementById(pickerId);
+          if (picker) picker.value = color;
+          this.caseManager.updateHairParams(this.hair.getParams());
+          this.addHistory('Changed tint color');
+        });
+      });
+
+      // Tint color picker
+      {
+        let _capturing = false;
+        const picker = document.getElementById(pickerId);
+        picker?.addEventListener('input', (e) => {
+          if (!_capturing) {
+            this.caseManager.beginAction('Changed tint color');
+            _capturing = true;
+          }
+          setTintColor(e.target.value);
+          document.querySelectorAll(`#${presetsId} .color-swatch`).forEach(s => s.classList.remove('active'));
+        });
+        picker?.addEventListener('change', () => {
+          this.caseManager.updateHairParams(this.hair.getParams());
+          this.caseManager.endAction();
+          _capturing = false;
+          this.addHistory('Changed tint color');
+        });
+      }
+
+      // Tint intensity slider
+      {
+        let _dragging = false;
+        const slider = document.getElementById(intensityId);
+        const valueDisplay = document.getElementById(intensityValueId);
+
+        slider?.addEventListener('mousedown', () => {
+          _dragging = true;
+          this.caseManager.beginAction('Changed tint intensity');
+          document.addEventListener('mouseup', onUp);
+        });
+
+        const onUp = () => {
+          if (_dragging) {
+            this.caseManager.updateHairParams(this.hair.getParams());
+            this.caseManager.endAction();
+            _dragging = false;
+            document.removeEventListener('mouseup', onUp);
+          }
+        };
+
+        slider?.addEventListener('input', (e) => {
+          const v = parseInt(e.target.value);
+          if (valueDisplay) valueDisplay.textContent = v;
+          setTintIntensity(v / 100);
+        });
+      }
+    };
+
+    // Hair tint controls
+    bindTintGroup(
+      'hairTintPresets', 'hairTintPicker', 'hairTintIntensity', 'hairTintIntensityValue',
+      (color) => this.hair.setHairTintColor(color),
+      (intensity) => this.hair.setHairTintIntensity(intensity)
+    );
+
+    // Beard tint controls
+    bindTintGroup(
+      'beardTintPresets', 'beardTintPicker', 'beardTintIntensity', 'beardTintIntensityValue',
+      (color) => this.hair.setBeardTintColor(color),
+      (intensity) => this.hair.setBeardTintIntensity(intensity)
+    );
+
+    // Eyebrow tint controls
+    bindTintGroup(
+      'eyebrowTintPresets', 'eyebrowTintPicker', 'eyebrowTintIntensity', 'eyebrowTintIntensityValue',
+      (color) => this.hair.setEyebrowTintColor(color),
+      (intensity) => this.hair.setEyebrowTintIntensity(intensity)
+    );
+  }
+
+  // ─── Manual Hair Tint Painter Controls ──────────────────────────────────
+
+  bindHairTintPainterControls() {
+    const painter = this.hairTintPainter;
+    if (!painter) return;
+
+    const btnToggle       = document.getElementById('btnToggleHairTintPaint');
+    const targetSelect    = document.getElementById('hairTintPaintTarget');
+    const sizeSlider      = document.getElementById('hairTintBrushSize');
+    const sizeValue       = document.getElementById('hairTintBrushSizeValue');
+    const strengthSlider  = document.getElementById('hairTintBrushStrength');
+    const strengthValue   = document.getElementById('hairTintBrushStrengthValue');
+    const colorPicker     = document.getElementById('hairTintBrushPicker');
+    const btnErase        = document.getElementById('btnHairTintErase');
+    const btnUndo         = document.getElementById('btnHairTintUndo');
+    const btnClearTarget  = document.getElementById('btnHairTintClearTarget');
+    const btnClearAll     = document.getElementById('btnHairTintClearAll');
+
+    // ── Disable other painters (mutual exclusion) ──
+    const disableOtherPainters = () => {
+      if (this.facePointEditor && this.facePointEditor.enabled) {
+        this.facePointEditor.disable();
+        document.getElementById('btnEditPoints')?.classList.remove('active');
+        const btn = document.getElementById('btnTogglePointEdit');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-hand-pointer"></i> Enable Point Editing'; }
+      }
+      if (this.skinMarkSystem && this.skinMarkSystem.enabled) {
+        this.skinMarkSystem.disable();
+        document.getElementById('btnSkinMarks')?.classList.remove('active');
+        const btn = document.getElementById('btnToggleSkinMarks');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-crosshairs"></i> Enable Mark Placement'; }
+      }
+      if (this.wrinklePainter && this.wrinklePainter.enabled) {
+        this.wrinklePainter.disable();
+        document.getElementById('btnWrinklePaint')?.classList.remove('active');
+        const btn = document.getElementById('btnToggleWrinklePaint');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-paint-brush"></i> Enable Wrinkle Painting'; }
+      }
+      if (this.lipPainter && this.lipPainter.enabled) {
+        this.lipPainter.disable();
+        document.getElementById('btnLipPaint')?.classList.remove('active');
+        const btn = document.getElementById('btnToggleLipPaint');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-pen"></i> Enable Lip Pen'; }
+      }
+      if (this.pigmentationPainter && this.pigmentationPainter.enabled) {
+        this.pigmentationPainter.disable();
+        document.getElementById('btnPigmentPaint')?.classList.remove('active');
+        const btn = document.getElementById('btnTogglePigmentPaint');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-tint"></i> Enable Pigmentation Pen'; }
+      }
+      if (this.decalSystem && this.decalSystem.enabled) {
+        this.decalSystem.disable();
+        document.getElementById('btnDecals')?.classList.remove('active');
+        const btn = document.getElementById('btnToggleDecalPlace');
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fas fa-crosshairs"></i> Place on Face'; }
+      }
+    };
+
+    // ── Toggle painter ──
+    const togglePainter = () => {
+      disableOtherPainters();
+      const active = painter.toggle();
+      if (btnToggle) {
+        btnToggle.classList.toggle('active', active);
+        btnToggle.innerHTML = active
+          ? '<i class="fas fa-times"></i> Disable Tint Brush'
+          : '<i class="fas fa-paint-brush"></i> Enable Tint Brush';
+      }
+      this.addHistory(active ? 'Hair tint brush enabled' : 'Hair tint brush disabled');
+    };
+
+    btnToggle?.addEventListener('click', togglePainter);
+
+    // ── Target selector ──
+    targetSelect?.addEventListener('change', (e) => {
+      painter.setTarget(e.target.value);
+      this.addHistory(`Tint brush target: ${e.target.value}`);
+    });
+
+    // ── Brush size ──
+    sizeSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      // Map slider 1-100 to world-space radius 0.01 – 0.25
+      painter.brushRadius = 0.01 + (v / 100) * 0.24;
+      if (sizeValue) sizeValue.textContent = v;
+    });
+
+    // ── Brush strength ──
+    strengthSlider?.addEventListener('input', (e) => {
+      const v = parseInt(e.target.value);
+      painter.brushStrength = v / 100;
+      if (strengthValue) strengthValue.textContent = v;
+    });
+
+    // ── Brush color presets ──
+    document.querySelectorAll('#hairTintBrushPresets .color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        const color = swatch.dataset.color;
+        painter.brushColor = color;
+        if (colorPicker) colorPicker.value = color;
+        document.querySelectorAll('#hairTintBrushPresets .color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+      });
+    });
+
+    // ── Brush color picker ──
+    colorPicker?.addEventListener('input', (e) => {
+      painter.brushColor = e.target.value;
+      document.querySelectorAll('#hairTintBrushPresets .color-swatch').forEach(s => s.classList.remove('active'));
+    });
+
+    // ── Eraser toggle ──
+    btnErase?.addEventListener('click', () => {
+      painter.eraseMode = !painter.eraseMode;
+      btnErase.classList.toggle('active', painter.eraseMode);
+    });
+
+    // ── Undo ──
+    btnUndo?.addEventListener('click', () => {
+      painter.undo();
+      this.addHistory('Undo tint brush stroke');
+    });
+
+    // ── Clear current target ──
+    btnClearTarget?.addEventListener('click', () => {
+      painter.clearTarget();
+      this.addHistory(`Cleared tint paint for ${painter.target}`);
+    });
+
+    // ── Clear all ──
+    btnClearAll?.addEventListener('click', () => {
+      painter.clearAll();
+      this.addHistory('Cleared all tint paint');
+    });
+  }
+
+  // ─── Case Controls ───────────────────────────────────────────────────────
+
+  bindCaseControls() {
+    // Save - Export case to JSON file
+    document.getElementById('btnSaveCase')?.addEventListener('click', () => {
+      this.updateCaseFromUI();
+      const success = this.caseManager.exportToFile();
+      if (success) {
+        this.showNotification('Case exported successfully', 'success');
+      }
+    });
+
+    // Load - Import case from JSON file
+    document.getElementById('btnLoadCase')?.addEventListener('click', async () => {
+      const imported = await this.caseManager.importFromFile();
+      if (imported) {
+        // Apply the imported case data to UI
+        const data = this.caseManager.currentCase;
+        
+        // Restore morph values
+        if (data.morphTargets) {
+          this.morpher.loadState(data.morphTargets);
+        }
+        // Restore hair
+        if (data.hairParams) {
+          this.hair.loadState(data.hairParams);
+        }
+        // Restore appearance
+        if (data.appearance?.skinColor) {
+          this.scene.setSkinColor(data.appearance.skinColor);
+        }
+        if (data.appearance?.lipColor) {
+          this.scene.setLipColor(data.appearance.lipColor);
+        }
+        if (data.appearance?.eyeColor) {
+          this.scene.setEyeColor(data.appearance.eyeColor);
+        }
+        // Restore eye parameters
+        if (data.appearance?.eyeParams && this.scene.eyeSystem) {
+          Object.entries(data.appearance.eyeParams).forEach(([key, value]) => {
+            this.scene.eyeSystem.setParam(key, value);
+          });
+        }
+        // Restore skin texture parameters
+        if (data.appearance?.skinTextureParams) {
+          Object.entries(data.appearance.skinTextureParams).forEach(([key, value]) => {
+            this.scene.setSkinTextureParam(key, value);
+          });
+        }
+        // Restore skin marks
+        if (data.skinMarks && this.skinMarkSystem) {
+          this.skinMarkSystem.loadState(data.skinMarks);
+        }
+        // Restore decals
+        if (data.decals && this.decalSystem) {
+          this.decalSystem.loadState(data.decals);
+          this._refreshDecalGallery();
+        }
+        // Restore manual wrinkle painting
+        if (data.appearance?.wrinklePaintData && this.wrinklePainter) {
+          this.wrinklePainter.loadState(data.appearance.wrinklePaintData);
+        }
+        // Restore manual lip painting
+        if (data.appearance?.lipPaintData && this.lipPainter) {
+          this.lipPainter.loadState(data.appearance.lipPaintData);
+        }
+        // Restore manual pigmentation painting
+        if (data.appearance?.pigmentPaintData && this.pigmentationPainter) {
+          this.pigmentationPainter.loadState(data.appearance.pigmentPaintData);
+        }
+        // Restore camera
+        if (data.cameraState) {
+          this.scene.loadCameraState(data.cameraState);
+        }
+        // Update UI fields
+        document.getElementById('caseNumber').value = data.caseNumber || '';
+        document.getElementById('caseName').value = data.caseName || '';
+        document.getElementById('investigator').value = data.investigator || '';
+        document.getElementById('caseDescription').value = data.description || '';
+        document.getElementById('caseNotes').value = data.notes || '';
+
+        this.updateCaseTitle();
+        this.updatePropertyPanel();
+        this.showNotification('Case imported successfully', 'success');
+      }
+    });
+
+    // New case
+    document.getElementById('btnNewCase')?.addEventListener('click', () => {
+      this.newCase();
+    });
+
+
+    // Case info fields — auto-update
+    ['caseNumber', 'caseName', 'investigator'].forEach(field => {
+      document.getElementById(field)?.addEventListener('input', (e) => {
+        this.caseManager.updateCaseInfo(field, e.target.value);
+        if (field === 'caseName' || field === 'caseNumber') {
+          this.updateCaseTitle();
+        }
+      });
+    });
+    document.getElementById('caseDescription')?.addEventListener('input', (e) => {
+      this.caseManager.updateCaseInfo('description', e.target.value);
+    });
+    document.getElementById('caseNotes')?.addEventListener('input', (e) => {
+      this.caseManager.updateCaseInfo('notes', e.target.value);
+    });
+  }
+
+  // ─── Group Collapse ──────────────────────────────────────────────────────
+
+  bindGroupCollapse() {
+    document.querySelectorAll('.control-group-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-reset-group')) return; // Don't toggle when clicking reset
+
+        const body = header.nextElementSibling;
+        if (body) {
+          body.classList.toggle('collapsed');
+          header.classList.toggle('collapsed');
+        }
+      });
+    });
+
+    // Sub-group collapse for hierarchical feature groups
+    document.querySelectorAll('.sub-group-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        const body = header.nextElementSibling;
+        if (body) {
+          body.classList.toggle('collapsed');
+          header.classList.toggle('collapsed');
+        }
+      });
+    });
+  }
+
+  // ─── Keyboard Shortcuts ──────────────────────────────────────────────────
+
+  bindKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 'z':
+            e.preventDefault();
+            this.undo();
+            break;
+          case 'y':
+            e.preventDefault();
+            this.redo();
+            break;
+          case 's':
+            e.preventDefault();
+            document.getElementById('btnSaveCase')?.click();
+            break;
+        }
+      }
+
+      // Number keys for views
+      if (e.key === '1') this.scene.setView('front');
+      if (e.key === '3') this.scene.setView('side');
+      if (e.key === '7') this.scene.setView('top');
+      if (e.key === '5') this.scene.setView('34');
+    });
+  }
+
+  // ─── Backend Status ──────────────────────────────────────────────────────
+
+  bindBackendStatus() {
+    this.api.onStatusChange = (connected, data) => {
+      const statusDot = document.querySelector('#backendStatus .status-dot');
+      const statusText = document.querySelector('#backendStatus .status-text');
+      const statusBar = document.getElementById('statusBackend');
+      const blenderStatus = document.getElementById('statusBlender');
+
+      if (connected) {
+        statusDot?.classList.add('connected');
+        if (statusText) statusText.textContent = 'Connected';
+        if (statusBar) statusBar.innerHTML = '<span class="status-dot-small connected"></span> Backend: Connected';
+
+        if (data?.blender_available) {
+          if (blenderStatus) blenderStatus.innerHTML = '<i class="fas fa-blender"></i> Blender: Ready';
+          blenderStatus?.classList.add('ready');
+        } else {
+          if (blenderStatus) blenderStatus.innerHTML = '<i class="fas fa-blender"></i> Blender: Not Found';
+        }
+      } else {
+        statusDot?.classList.remove('connected');
+        if (statusText) statusText.textContent = 'Offline';
+        if (statusBar) statusBar.innerHTML = '<span class="status-dot-small"></span> Backend: Offline';
+        if (blenderStatus) blenderStatus.innerHTML = '<i class="fas fa-blender"></i> Blender: N/A';
+      }
+    };
+
+    this.api.startHealthCheck(5000);
+  }
+
+  // ─── Helper Methods ──────────────────────────────────────────────────────
+
+  updateCaseFromUI() {
+    this.caseManager.updateCaseInfo('caseNumber', document.getElementById('caseNumber')?.value || '');
+    this.caseManager.updateCaseInfo('caseName', document.getElementById('caseName')?.value || 'Untitled');
+    this.caseManager.updateCaseInfo('investigator', document.getElementById('investigator')?.value || '');
+    this.caseManager.updateCaseInfo('description', document.getElementById('caseDescription')?.value || '');
+    this.caseManager.updateCaseInfo('notes', document.getElementById('caseNotes')?.value || '');
+    this.caseManager.updateMorphTargets(this.morpher.exportState());
+    this.caseManager.updateHairParams(this.hair.getParams());
+    if (this.eyeSystem) {
+      this.caseManager.updateAppearance('eyeParams', this.eyeSystem.getParams());
+      this.caseManager.updateAppearance('eyeColor', this.eyeSystem.eyeColor);
+      this.caseManager.updateAppearance('eyelashParams', this.eyeSystem.getEyelashParams());
+    }
+    if (this.skinMarkSystem) {
+      this.caseManager.updateSkinMarks(this.skinMarkSystem.exportState());
+    }
+    if (this.glassesSystem) {
+      this.caseManager.updateAppearance('glasses', this.glassesSystem.exportState());
+    }
+    if (this.faceMaskSystem) {
+      this.caseManager.updateAppearance('faceMask', this.faceMaskSystem.exportState());
+    }
+    if (this.earringSystem) {
+      this.caseManager.updateAppearance('earrings', this.earringSystem.exportState());
+    }
+    if (this.bandanaSystem) {
+      this.caseManager.updateAppearance('bandana', this.bandanaSystem.exportState());
+    }
+    if (this.browPiercingSystem) {
+      this.caseManager.updateAppearance('browPiercing', this.browPiercingSystem.exportState());
+    }
+    this.caseManager.currentCase.cameraState = this.scene.getCameraState();
+  }
+
+  updateCaseTitle() {
+    const titleEl = document.getElementById('caseTitle');
+    if (titleEl) titleEl.textContent = this.caseManager.getTitle();
+  }
+
+  updateViewAngle(name) {
+    const el = document.getElementById('viewAngle');
+    if (el) el.textContent = name;
+  }
+
+  updatePropertyPanel() {
+    const modCount = document.getElementById('modifiedCount');
+    if (modCount) modCount.textContent = this.morpher.getModifiedCount();
+
+    const hairStyleEl = document.getElementById('currentHairStyle');
+    if (hairStyleEl) hairStyleEl.textContent = this.formatStyleName(this.hair.currentStyle);
+
+    const skinToneEl = document.getElementById('currentSkinTone');
+    const skinColor = this.caseManager.currentCase.appearance.skinColor;
+    if (skinToneEl) {
+      skinToneEl.innerHTML = `<span class="mini-swatch" style="background: ${skinColor};"></span>`;
+    }
+
+    const lipColorEl = document.getElementById('currentLipColor');
+    const lipColor = this.caseManager.currentCase.appearance.lipColor;
+    if (lipColorEl) {
+      lipColorEl.innerHTML = lipColor
+        ? `<span class="mini-swatch" style="background: ${lipColor};"></span>`
+        : 'None';
+    }
+
+    const eyeColorEl = document.getElementById('currentEyeColor');
+    const eyeColor = this.caseManager.currentCase.appearance.eyeColor;
+    if (eyeColorEl) {
+      eyeColorEl.innerHTML = `<span class="mini-swatch" style="background: ${eyeColor};"></span>`;
+    }
+
+    const markCountEl = document.getElementById('currentSkinMarkCount');
+    if (markCountEl && this.skinMarkSystem) {
+      markCountEl.textContent = this.skinMarkSystem.getMarkCount();
+    }
+
+    const decalCountEl = document.getElementById('currentDecalCount');
+    if (decalCountEl && this.decalSystem) {
+      decalCountEl.textContent = this.decalSystem.getDecalCount();
+    }
+
+    // Vertex count
+    const polyEl = document.getElementById('polyCount');
+    if (polyEl) polyEl.textContent = `Vertices: ${this.scene.getVertexCount().toLocaleString()}`;
+  }
+
+  addHistory(message) {
+    this.historyLog.unshift(message);
+    if (this.historyLog.length > 30) this.historyLog.pop();
+
+    const historyList = document.getElementById('historyList');
+    if (historyList) {
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      item.textContent = message;
+      historyList.prepend(item);
+
+      // Limit displayed items
+      while (historyList.children.length > 20) {
+        historyList.removeChild(historyList.lastChild);
+      }
+    }
+  }
+
+  showLoading(text = 'Processing...') {
+    const overlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
+    if (overlay) overlay.style.display = 'flex';
+    if (loadingText) loadingText.textContent = text;
+  }
+
+  hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  async takeScreenshot() {
+    const dataUrl = this.scene.takeScreenshot();
+    if (window.electronAPI) {
+      const result = await window.electronAPI.saveDialog({
+        title: 'Save Screenshot',
+        defaultPath: `nishaan_screenshot_${Date.now()}.png`,
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+      if (!result.canceled && result.filePath) {
+        const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+        await window.electronAPI.saveFile(result.filePath, base64Data);
+        this.addHistory('Screenshot saved');
+      }
+    } else {
+      // Browser fallback — download
+      const link = document.createElement('a');
+      link.download = `nishaan_screenshot_${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+      this.addHistory('Screenshot downloaded');
+    }
+  }
+
+
+
+  resetAllFeatures() {
+    this.caseManager.pushState('Reset all features');
+
+    // Reset facial morphs
+    this.morpher.resetAll();
+    document.querySelectorAll('.morph-slider').forEach(s => {
+      const param = s.closest('.slider-control')?.dataset.param;
+      const def = param && this.morpher.getDefault ? this.morpher.getDefault(param) : 50;
+      s.value = def;
+      const v = s.closest('.slider-control')?.querySelector('.slider-value');
+      if (v) v.textContent = String(def);
+    });
+
+    // Reset hair
+    this.hair.setStyle('hair1');
+    this.hair.setColor('#2c1b0e');
+    document.querySelectorAll('#hairStyleCards .style-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.style === 'hair1');
+    });
+
+    // Reset beard
+    this.hair.setBeard('none');
+    this.hair.setBeardColor('#2c1b0e');
+    const beardDefaults = { scale: 100, posX: 100, posY: 100, posZ: 100, rotY: 100, rotZ: 100 };
+    Object.entries(beardDefaults).forEach(([key, val]) => this.hair.setBeardParam(key, val));
+    this._updateBeardPositionSliders(beardDefaults);
+    const beardPicker = document.getElementById('beardColorPicker');
+    if (beardPicker) beardPicker.value = '#2c1b0e';
+    document.querySelectorAll('#beardColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#2c1b0e');
+    });
+
+    // Reset eyebrows
+    this.hair.setEyebrowColor('#2c1b0e');
+    const ebDefaults = { thickness: 100, arch: 0, spacing: 42, density: 70,
+                          posX: 51, posY: 72, posZ: 49, rotation: 100, scale: 65,
+                          straighten: 51, tiltX: 69 };
+    Object.entries(ebDefaults).forEach(([key, val]) => this.hair.setEyebrowParam(key, val));
+    this.hair.generateEyebrows();
+    const ebSliderDefaults = { eyebrowThickness: 100, eyebrowArch: 0, eyebrowSpacing: 42,
+      eyebrowDensity: 70, eyebrowPosX: 51, eyebrowPosY: 72, eyebrowPosZ: 49,
+      eyebrowRotation: 100, eyebrowScale: 65, eyebrowStraighten: 51, eyebrowTiltX: 69 };
+    document.querySelectorAll('.eyebrow-slider').forEach(s => {
+      const param = s.closest('.slider-control')?.dataset.param;
+      const defaultVal = ebSliderDefaults[param] ?? 50;
+      s.value = defaultVal;
+      const v = s.closest('.slider-control')?.querySelector('.slider-value');
+      if (v) v.textContent = defaultVal;
+    });
+    const ebPicker = document.getElementById('eyebrowColorPicker');
+    if (ebPicker) ebPicker.value = '#2c1b0e';
+    document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#2c1b0e');
+    });
+
+    // Reset eyelashes
+    if (this.eyeSystem) {
+      const lashDefaults = { scale: 59, posX: 51, posY: 47, posZ: 15,
+        rotX: 50, rotY: 50, rotZ: 50, curl: 50, thickness: 65 };
+      Object.entries(lashDefaults).forEach(([key, val]) => this.eyeSystem.setEyelashParam(key, val));
+      this.eyeSystem.setEyelashColor('#0a0a0a');
+      this.eyeSystem.generateEyelashes();
+    }
+    const lashParamDefaults = {
+      eyelashScale: 59, eyelashPosX: 51, eyelashPosY: 47, eyelashPosZ: 15,
+      eyelashRotX: 50, eyelashRotY: 50, eyelashRotZ: 50, eyelashCurl: 50, eyelashThickness: 65,
+    };
+    document.querySelectorAll('.eyelash-slider').forEach(s => {
+      const param = s.closest('.slider-control')?.dataset.param;
+      const val = lashParamDefaults[param] ?? 50;
+      s.value = val;
+      const v = s.closest('.slider-control')?.querySelector('.slider-value');
+      if (v) v.textContent = String(val);
+    });
+    const lashPicker = document.getElementById('eyelashColorPicker');
+    if (lashPicker) lashPicker.value = '#0a0a0a';
+    document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#0a0a0a');
+    });
+
+    // Reset eyes (color + positioning)
+    if (this.eyeSystem) {
+      this.eyeSystem.setEyeColor('#634e34');
+      const eyeDefaults = { scale: 50, spacing: 50, posX: 50, posY: 50, posZ: 50,
+        rotX: 50, rotY: 50, rotZ: 50, opacity: 100 };
+      Object.entries(eyeDefaults).forEach(([key, val]) => this.eyeSystem.setParam(key, val));
+    }
+    const eyeColorPicker = document.getElementById('eyeColorPicker');
+    if (eyeColorPicker) eyeColorPicker.value = '#634e34';
+    document.querySelectorAll('#eyeColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#634e34');
+    });
+    const eyeParamDefaults = {
+      eyeScale: 50, eyeSpacing: 50, eyePosX: 50, eyePosY: 50, eyePosZ: 50,
+      eyeRotX: 50, eyeRotY: 50, eyeRotZ: 50, eyeOpacity: 100,
+    };
+    document.querySelectorAll('.eye-slider').forEach(slider => {
+      const pName = slider.closest('.slider-control')?.dataset.param;
+      const val = eyeParamDefaults[pName] ?? 50;
+      slider.value = val;
+      const vd = slider.closest('.slider-control')?.querySelector('.slider-value');
+      if (vd) vd.textContent = String(val);
+    });
+
+    // Reset skin color
+    this.scene.setSkinColor('#d4a574');
+
+    // Reset lip color
+    this.scene.setLipColor(null);
+    document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+
+    // Clear wrinkles
+    if (this.wrinklePainter) this.wrinklePainter.clearAll();
+
+    // Clear pigmentation
+    if (this.pigmentationPainter) this.pigmentationPainter.clearAll();
+
+    // Clear lip paint
+    if (this.lipPainter) this.lipPainter.clearAll();
+
+    // Clear skin marks
+    if (this.skinMarkSystem) this.skinMarkSystem.clearAll();
+
+    // Clear decals
+    if (this.decalSystem) this.decalSystem.clearAll();
+
+    // Reset glasses
+    if (this.glassesSystem) {
+      const glassesDefaults = {
+        enabled: false, style: 'glasses1',
+        frameColor: '#1a1a1a', lensColor: '#88ccff', lensOpacity: 20,
+        scale: 100, lensScale: 100, armSplay: 0, armLength: 100,
+        posX: 0, posY: 0, posZ: 0, rotX: 0, rotY: 0, rotZ: 0,
+      };
+      this.glassesSystem.loadState(glassesDefaults);
+      this._syncGlassesUI(glassesDefaults);
+      this.caseManager.updateAppearance('glasses', this.glassesSystem.exportState());
+    }
+
+    // Reset face mask
+    if (this.faceMaskSystem) {
+      const maskDefaults = this.faceMaskSystem.getStyleDefaults('mask1');
+      this.faceMaskSystem.loadState(maskDefaults);
+      this._syncFaceMaskUI(maskDefaults);
+      this.caseManager.updateAppearance('faceMask', this.faceMaskSystem.exportState());
+    }
+
+    // Reset earrings
+    if (this.earringSystem) {
+      const earringDefaults = this.earringSystem.getStyleDefaults('hoop');
+      this.earringSystem.loadState(earringDefaults);
+      this._syncEarringUI(earringDefaults);
+      this.caseManager.updateAppearance('earrings', this.earringSystem.exportState());
+    }
+
+    // Reset bandana
+    if (this.bandanaSystem) {
+      const bandanaDefaults = this.bandanaSystem.getStyleDefaults('paisley');
+      this.bandanaSystem.loadState(bandanaDefaults);
+      this._syncBandanaUI(bandanaDefaults);
+      this.caseManager.updateAppearance('bandana', this.bandanaSystem.exportState());
+    }
+
+    // Reset eyebrow piercing
+    if (this.browPiercingSystem) {
+      const browDefaults = this.browPiercingSystem.getDefaults();
+      this.browPiercingSystem.loadState(browDefaults);
+      this._syncBrowRingUI(browDefaults);
+      this.caseManager.updateAppearance('browPiercing', this.browPiercingSystem.exportState());
+    }
+
+    // Reset skin texture
+    if (this.skinTextureSystem) {
+      this.skinTextureSystem.params = {
+        age: 20, roughness: 50, freckles: 0,
+        poreDetail: 0, wrinkleDepth: 30, skinOiliness: 0, sunDamage: 10,
+      };
+      this.skinTextureSystem.regenerate();
+    }
+
+    this.updatePropertyPanel();
+    this.addHistory('Reset all features');
+  }
+
+  newCase() {
+    this.caseManager.newCase();
+    this.morpher.resetAll();
+    this.hair.setStyle('hair1');
+    this.hair.setColor('#2c1b0e');
+    this.hair.setEyebrowColor('#2c1b0e');
+    const ebDefaults = { thickness: 100, arch: 0, spacing: 42, density: 70,
+                          posX: 51, posY: 72, posZ: 49, rotation: 100, scale: 65,
+                          straighten: 51, tiltX: 69 };
+    Object.entries(ebDefaults).forEach(([key, val]) => {
+      this.hair.setEyebrowParam(key, val);
+    });
+    this.hair.generateEyebrows();
+    this.scene.setSkinColor('#d4a574');
+    this.scene.setLipColor(null);
+    document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => s.classList.remove('active'));
+    if (this.skinMarkSystem) this.skinMarkSystem.clearAll();
+    if (this.decalSystem) this.decalSystem.clearAll();
+
+    // Reset glasses for the new case
+    if (this.glassesSystem) {
+      const glassesDefaults = {
+        enabled: false, style: 'glasses1',
+        frameColor: '#1a1a1a', lensColor: '#88ccff', lensOpacity: 20,
+        scale: 100, lensScale: 100, armSplay: 0, armLength: 100,
+        posX: 0, posY: 0, posZ: 0, rotX: 0, rotY: 0, rotZ: 0,
+      };
+      this.glassesSystem.loadState(glassesDefaults);
+      this._syncGlassesUI(glassesDefaults);
+    }
+
+    // Reset face mask for the new case
+    if (this.faceMaskSystem) {
+      const maskDefaults = this.faceMaskSystem.getStyleDefaults('mask1');
+      this.faceMaskSystem.loadState(maskDefaults);
+      this._syncFaceMaskUI(maskDefaults);
+    }
+
+    // Reset earrings for the new case
+    if (this.earringSystem) {
+      const earringDefaults = this.earringSystem.getStyleDefaults('hoop');
+      this.earringSystem.loadState(earringDefaults);
+      this._syncEarringUI(earringDefaults);
+    }
+
+    // Reset bandana for the new case
+    if (this.bandanaSystem) {
+      const bandanaDefaults = this.bandanaSystem.getStyleDefaults('paisley');
+      this.bandanaSystem.loadState(bandanaDefaults);
+      this._syncBandanaUI(bandanaDefaults);
+    }
+
+    // Reset eyebrow piercing for the new case
+    if (this.browPiercingSystem) {
+      const browDefaults = this.browPiercingSystem.getDefaults();
+      this.browPiercingSystem.loadState(browDefaults);
+      this._syncBrowRingUI(browDefaults);
+    }
+
+    // Reset UI
+    document.querySelectorAll('.morph-slider').forEach(s => {
+      const param = s.closest('.slider-control')?.dataset.param;
+      const def = param && this.morpher.getDefault ? this.morpher.getDefault(param) : 50;
+      s.value = def;
+      const v = s.closest('.slider-control')?.querySelector('.slider-value');
+      if (v) v.textContent = String(def);
+    });
+    document.getElementById('caseNumber').value = '';
+    document.getElementById('caseName').value = '';
+    document.getElementById('investigator').value = '';
+    document.getElementById('caseDescription').value = '';
+    document.getElementById('caseNotes').value = '';
+
+    // Reset eyebrow sliders UI
+    const ebSliderDefaults = { eyebrowThickness: 100, eyebrowArch: 0, eyebrowSpacing: 42,
+      eyebrowDensity: 70, eyebrowPosX: 51, eyebrowPosY: 72, eyebrowPosZ: 49,
+      eyebrowRotation: 100, eyebrowScale: 65, eyebrowStraighten: 51, eyebrowTiltX: 69 };
+    document.querySelectorAll('.eyebrow-slider').forEach(s => {
+      const control = s.closest('.slider-control');
+      const param = control?.dataset.param;
+      const defaultVal = ebSliderDefaults[param] ?? 50;
+      s.value = defaultVal;
+      const v = control?.querySelector('.slider-value');
+      if (v) v.textContent = defaultVal;
+    });
+    const ebPicker = document.getElementById('eyebrowColorPicker');
+    if (ebPicker) ebPicker.value = '#2c1b0e';
+    document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#2c1b0e');
+    });
+
+    // Reset eyelashes
+    if (this.eyeSystem) {
+      const lashDefaults = { scale: 59, posX: 51, posY: 47, posZ: 15,
+        rotX: 50, rotY: 50, rotZ: 50, curl: 50, thickness: 65 };
+      Object.entries(lashDefaults).forEach(([key, val]) => this.eyeSystem.setEyelashParam(key, val));
+      this.eyeSystem.setEyelashColor('#0a0a0a');
+      this.eyeSystem.generateEyelashes();
+    }
+    const lashParamDefaults = {
+      eyelashScale: 59, eyelashPosX: 51, eyelashPosY: 47, eyelashPosZ: 15,
+      eyelashRotX: 50, eyelashRotY: 50, eyelashRotZ: 50, eyelashCurl: 50, eyelashThickness: 65,
+    };
+    document.querySelectorAll('.eyelash-slider').forEach(s => {
+      const param = s.closest('.slider-control')?.dataset.param;
+      const val = lashParamDefaults[param] ?? 50;
+      s.value = val;
+      const v = s.closest('.slider-control')?.querySelector('.slider-value');
+      if (v) v.textContent = String(val);
+    });
+    const lashPicker = document.getElementById('eyelashColorPicker');
+    if (lashPicker) lashPicker.value = '#0a0a0a';
+    document.querySelectorAll('#eyelashColorPresets .color-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.color === '#0a0a0a');
+    });
+
+    this.updateCaseTitle();
+    this.updatePropertyPanel();
+    this.addHistory('New case created');
+  }
+
+  async loadCase(filePath) {
+    this.showLoading('Loading case...');
+    const data = await this.caseManager.load(filePath);
+    this.hideLoading();
+
+    if (data && !data.error) {
+      // Restore morph values
+      if (data.morphTargets) {
+        this.morpher.loadState(data.morphTargets);
+      }
+      // Restore hair
+      if (data.hairParams) {
+        this.hair.loadState(data.hairParams);
+      }
+      // Restore appearance
+      if (data.appearance?.skinColor) {
+        this.scene.setSkinColor(data.appearance.skinColor);
+      }
+      if (data.appearance?.lipColor) {
+        this.scene.setLipColor(data.appearance.lipColor);
+      }
+      // Restore skin marks
+      if (data.skinMarks && this.skinMarkSystem) {
+        this.skinMarkSystem.loadState(data.skinMarks);
+      }
+      // Restore decals
+      if (data.decals && this.decalSystem) {
+        this.decalSystem.loadState(data.decals);
+        this._refreshDecalGallery();
+      }
+      // Restore manual wrinkle painting
+      if (data.appearance?.wrinklePaintData && this.wrinklePainter) {
+        this.wrinklePainter.loadState(data.appearance.wrinklePaintData);
+      }
+      // Restore manual lip painting
+      if (data.appearance?.lipPaintData && this.lipPainter) {
+        this.lipPainter.loadState(data.appearance.lipPaintData);
+      }
+      // Restore manual pigmentation painting
+      if (data.appearance?.pigmentPaintData && this.pigmentationPainter) {
+        this.pigmentationPainter.loadState(data.appearance.pigmentPaintData);
+      }
+      // Restore glasses
+      if (data.appearance?.glasses && this.glassesSystem) {
+        this.glassesSystem.loadState(data.appearance.glasses);
+        this._syncGlassesUI(data.appearance.glasses);
+      }
+      // Restore face mask
+      if (data.appearance?.faceMask && this.faceMaskSystem) {
+        this.faceMaskSystem.loadState(data.appearance.faceMask);
+        this._syncFaceMaskUI(data.appearance.faceMask);
+      }
+      // Restore earrings
+      if (data.appearance?.earrings && this.earringSystem) {
+        this.earringSystem.loadState(data.appearance.earrings);
+        this._syncEarringUI(data.appearance.earrings);
+      }
+      // Restore bandana
+      if (data.appearance?.bandana && this.bandanaSystem) {
+        this.bandanaSystem.loadState(data.appearance.bandana);
+        this._syncBandanaUI(data.appearance.bandana);
+      }
+      // Restore eyebrow piercing
+      if (data.appearance?.browPiercing && this.browPiercingSystem) {
+        this.browPiercingSystem.loadState(data.appearance.browPiercing);
+        this._syncBrowRingUI(data.appearance.browPiercing);
+      }
+      // Restore camera
+      if (data.cameraState) {
+        this.scene.loadCameraState(data.cameraState);
+      }
+      // Update UI fields
+      document.getElementById('caseNumber').value = data.caseNumber || '';
+      document.getElementById('caseName').value = data.caseName || '';
+      document.getElementById('investigator').value = data.investigator || '';
+      document.getElementById('caseDescription').value = data.description || '';
+      document.getElementById('caseNotes').value = data.notes || '';
+
+      this.updateCaseTitle();
+      this.updatePropertyPanel();
+      this.addHistory(`Loaded case: ${data.caseName || 'Untitled'}`);
+    } else {
+      this.addHistory('Failed to load case');
+    }
+  }
+
+  undo() {
+    const state = this.caseManager.undo();
+    if (state) {
+      this.restoreState(state);
+      this.addHistory('Undo');
+    }
+  }
+
+  redo() {
+    const state = this.caseManager.redo();
+    if (state) {
+      this.restoreState(state);
+      this.addHistory('Redo');
+    }
+  }
+
+  restoreState(state) {
+    // Restore morph targets + slider UI
+    if (state.morphTargets !== undefined) {
+      if (Object.keys(state.morphTargets).length > 0) {
+        this.morpher.loadState(state.morphTargets);
+      } else {
+        // Empty morphTargets means restore to defaults
+        this.morpher.resetAll();
+      }
+      // Sync slider UI to match restored values
+      Object.entries(this.morpher.morphValues).forEach(([param, value]) => {
+        const slider = document.querySelector(`[data-param="${param}"] .morph-slider`);
+        if (slider) {
+          slider.value = value;
+          const v = slider.closest('.slider-control')?.querySelector('.slider-value');
+          if (v) v.textContent = value;
+        }
+      });
+    }
+
+    // Restore hair params
+    if (state.hairParams) {
+      this.hair.loadState(state.hairParams);
+      // Update hair slider UI
+      document.querySelectorAll('.hair-slider').forEach(slider => {
+        const control = slider.closest('.slider-control');
+        const param = control?.dataset.param;
+        if (param && param.startsWith('hair')) {
+          const key = param.replace('hair', '').toLowerCase();
+          const val = state.hairParams[key];
+          if (val !== undefined) {
+            slider.value = val;
+            const vd = control?.querySelector('.slider-value');
+            if (vd) vd.textContent = val;
+          }
+        }
+      });
+      // Update active hair style card
+      if (state.hairParams.style) {
+        document.querySelectorAll('#hairStyleGrid .hair-style-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.style === state.hairParams.style);
+        });
+      }
+      // Update hair color picker
+      if (state.hairParams.color) {
+        const picker = document.getElementById('hairColorPicker');
+        if (picker) picker.value = state.hairParams.color;
+        document.querySelectorAll('#hairColorPresets .color-swatch').forEach(s => {
+          s.classList.toggle('active', s.dataset.color === state.hairParams.color);
+        });
+      }
+      // Restore hair tint
+      if (state.hairParams.hairTintColor) {
+        const tintPicker = document.getElementById('hairTintPicker');
+        if (tintPicker) tintPicker.value = state.hairParams.hairTintColor;
+      }
+      if (state.hairParams.hairTintIntensity !== undefined) {
+        const tintSlider = document.getElementById('hairTintIntensity');
+        const tintValue = document.getElementById('hairTintIntensityValue');
+        const v = Math.round(state.hairParams.hairTintIntensity * 100);
+        if (tintSlider) tintSlider.value = v;
+        if (tintValue) tintValue.textContent = v;
+      }
+      // Update beard dropdown and params
+      if (state.hairParams.beard) {
+        const beard = state.hairParams.beard;
+        const sel = document.getElementById('beardStyle');
+        if (sel && beard.style) sel.value = beard.style;
+        
+        // Restore beard sliders
+        document.querySelectorAll('.beard-slider').forEach(slider => {
+          const control = slider.closest('.slider-control');
+          const param = control?.dataset.param;
+          if (param) {
+            const key = param.replace('beard', '');
+            const beardKey = key.charAt(0).toLowerCase() + key.slice(1);
+            const val = beard[beardKey];
+            if (val !== undefined) {
+              slider.value = val;
+              const vd = control?.querySelector('.slider-value');
+              if (vd) vd.textContent = val;
+            }
+          }
+        });
+        
+        // Restore beard color
+        if (beard.color) {
+          const picker = document.getElementById('beardColorPicker');
+          if (picker) picker.value = beard.color;
+          document.querySelectorAll('#beardColorPresets .color-swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.color === beard.color);
+          });
+        }
+        // Restore beard tint
+        if (beard.tintColor) {
+          const tintPicker = document.getElementById('beardTintPicker');
+          if (tintPicker) tintPicker.value = beard.tintColor;
+        }
+        if (beard.tintIntensity !== undefined) {
+          const tintSlider = document.getElementById('beardTintIntensity');
+          const tintValue = document.getElementById('beardTintIntensityValue');
+          const v = Math.round(beard.tintIntensity * 100);
+          if (tintSlider) tintSlider.value = v;
+          if (tintValue) tintValue.textContent = v;
+        }
+      }
+      // Restore eyebrow params
+      if (state.hairParams.eyebrows) {
+        const eb = state.hairParams.eyebrows;
+        document.querySelectorAll('.eyebrow-slider').forEach(slider => {
+          const control = slider.closest('.slider-control');
+          const param = control?.dataset.param;
+          if (param) {
+            const key = param.replace('eyebrow', '');
+            const ebKey = key.charAt(0).toLowerCase() + key.slice(1);
+            const val = eb[ebKey];
+            if (val !== undefined) {
+              slider.value = val;
+              const vd = control?.querySelector('.slider-value');
+              if (vd) vd.textContent = val;
+            }
+          }
+        });
+        if (eb.color) {
+          const picker = document.getElementById('eyebrowColorPicker');
+          if (picker) picker.value = eb.color;
+          document.querySelectorAll('#eyebrowColorPresets .color-swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.color === eb.color);
+          });
+        }
+        // Restore eyebrow tint
+        if (eb.tintColor) {
+          const tintPicker = document.getElementById('eyebrowTintPicker');
+          if (tintPicker) tintPicker.value = eb.tintColor;
+        }
+        if (eb.tintIntensity !== undefined) {
+          const tintSlider = document.getElementById('eyebrowTintIntensity');
+          const tintValue = document.getElementById('eyebrowTintIntensityValue');
+          const v = Math.round(eb.tintIntensity * 100);
+          if (tintSlider) tintSlider.value = v;
+          if (tintValue) tintValue.textContent = v;
+        }
+      }
+    }
+
+    // Restore appearance (skin color, eye color)
+    if (state.appearance) {
+      // Restore wrinkle paint BEFORE skin color so that regenerate() uses the correct data.
+      // Clear wrinkle paint if the state doesn't have it.
+      if (this.wrinklePainter) {
+        if (state.appearance.wrinklePaintData) {
+          this.wrinklePainter.loadState(state.appearance.wrinklePaintData);
+        } else {
+          this.wrinklePainter.clearAll();
+        }
+      }
+
+      // Restore/clear pigmentation paint
+      if (this.pigmentationPainter) {
+        if (state.appearance.pigmentPaintData) {
+          this.pigmentationPainter.loadState(state.appearance.pigmentPaintData);
+        } else {
+          this.pigmentationPainter.clearAll();
+        }
+      }
+
+      // Restore skin color — this regenerates the skin texture (which now includes
+      // the correct wrinkle data) and updates SceneManager._skinColor.
+      if (state.appearance.skinColor) {
+        this.scene.setSkinColor(state.appearance.skinColor);
+        const skinPicker = document.getElementById('skinColorPicker');
+        if (skinPicker) skinPicker.value = state.appearance.skinColor;
+        document.querySelectorAll('#skinToneGrid .skin-swatch').forEach(s => {
+          s.classList.toggle('active', s.dataset.color === state.appearance.skinColor);
+        });
+      }
+
+      // Restore lip paint overrides BEFORE lip color so vertex colors blend correctly.
+      // Clear lip paint if the state doesn't have it.
+      if (this.lipPainter) {
+        if (state.appearance.lipPaintData) {
+          // loadState calls _updateVertexColors internally
+          this.lipPainter.loadState(state.appearance.lipPaintData);
+        } else {
+          this.lipPainter.clearAll();
+        }
+      }
+
+      // Restore lip color AFTER skin color and lip paint so vertex colors are correct.
+      {
+        const lc = state.appearance.lipColor;
+        this.scene.setLipColor(lc || null);
+        const lipPicker = document.getElementById('lipColorPicker');
+        if (lipPicker && lc) lipPicker.value = lc;
+        document.querySelectorAll('#lipColorPresets .color-swatch').forEach(s => {
+          s.classList.toggle('active', lc && s.dataset.color === lc);
+        });
+      }
+      if (state.appearance.eyeColor) {
+        const eyePicker = document.getElementById('eyeColorPicker');
+        if (eyePicker) eyePicker.value = state.appearance.eyeColor;
+        if (this.eyeSystem) this.eyeSystem.setEyeColor(state.appearance.eyeColor);
+        document.querySelectorAll('#eyeColorPresets .color-swatch').forEach(s => {
+          s.classList.toggle('active', s.dataset.color === state.appearance.eyeColor);
+        });
+      }
+      if (state.appearance.eyeParams && this.eyeSystem) {
+        const ep = state.appearance.eyeParams;
+        Object.entries(ep).forEach(([key, val]) => {
+          if (this.eyeSystem.params[key] !== undefined) {
+            this.eyeSystem.setParam(key, val);
+          }
+        });
+
+        document.querySelectorAll('.eye-slider').forEach(slider => {
+          const control = slider.closest('.slider-control');
+          const param = control?.dataset.param;
+          if (!param || !param.startsWith('eye')) return;
+          const key = param.replace('eye', '');
+          const eyeKey = key.charAt(0).toLowerCase() + key.slice(1);
+          if (ep[eyeKey] !== undefined) {
+            slider.value = ep[eyeKey];
+            const vd = control?.querySelector('.slider-value');
+            if (vd) vd.textContent = ep[eyeKey];
+          }
+        });
+      }
+      if (state.appearance.ageRange) {
+        const ageEl = document.getElementById('ageRange');
+        if (ageEl) ageEl.value = state.appearance.ageRange;
+      }
+      if (state.appearance.sex) {
+        const sexEl = document.getElementById('sexSelect');
+        if (sexEl) sexEl.value = state.appearance.sex;
+      }
+      // Restore skin texture params (age, pores, etc.)
+      if (this.skinTextureSystem) {
+        const params = state.appearance.skinTextureParams;
+        console.log('[restoreState] skinTextureParams:', params);
+        
+        if (params) {
+          Object.entries(params).forEach(([key, val]) => {
+            this.skinTextureSystem.setParam(key, val);
+          });
+        } else {
+          // Reset to defaults if no skin texture params in state
+          console.log('[restoreState] No skinTextureParams, resetting to defaults');
+          const defaults = { age: 20, wrinkleDepth: 0, roughness: 30, poreDetail: 0, freckles: 0, skinOiliness: 0, sunDamage: 0 };
+          Object.entries(defaults).forEach(([key, val]) => {
+            this.skinTextureSystem.setParam(key, val);
+          });
+        }
+        this.skinTextureSystem.regenerate();
+        
+        // Update skin texture sliders
+        const sliderMap = {
+          sliderSkinAge: 'age',
+          sliderWrinkleDepth: 'wrinkleDepth',
+          sliderSkinRoughness: 'roughness',
+          sliderPoreDetail: 'poreDetail',
+          sliderSunDamage: 'sunDamage',
+        };
+        const valMap = {
+          sliderSkinAge: 'valSkinAge',
+          sliderWrinkleDepth: 'valWrinkleDepth',
+          sliderSkinRoughness: 'valSkinRoughness',
+          sliderPoreDetail: 'valPoreDetail',
+          sliderSunDamage: 'valSunDamage',
+        };
+        const effectiveParams = params || { age: 20, wrinkleDepth: 0, roughness: 30, poreDetail: 0, freckles: 0, skinOiliness: 0, sunDamage: 0 };
+        for (const [sliderId, paramKey] of Object.entries(sliderMap)) {
+          const slider = document.getElementById(sliderId);
+          const valEl = document.getElementById(valMap[sliderId]);
+          if (slider && effectiveParams[paramKey] !== undefined) {
+            slider.value = effectiveParams[paramKey];
+            if (valEl) valEl.textContent = effectiveParams[paramKey];
+          }
+        }
+      }
+    }
+
+    // Restore skin marks
+    if (state.skinMarks && this.skinMarkSystem) {
+      this.skinMarkSystem.loadState(state.skinMarks);
+    }
+
+    // Restore decals
+    if (this.decalSystem) {
+      if (state.decals && state.decals.length > 0) {
+        this.decalSystem.deserialize(state.decals);
+      } else {
+        this.decalSystem.clearAll();
+      }
+    }
+
+    // Restore eyelash params
+    if (state.appearance?.eyelashParams && this.eyeSystem) {
+      const lp = state.appearance.eyelashParams;
+      Object.entries(lp).forEach(([key, val]) => {
+        this.eyeSystem.setEyelashParam(key, val);
+      });
+      if (lp.color) this.eyeSystem.setEyelashColor(lp.color);
+      this.eyeSystem.generateEyelashes();
+      document.querySelectorAll('.eyelash-slider').forEach(slider => {
+        const param = slider.closest('.slider-control')?.dataset.param;
+        if (!param) return;
+        const key = param.replace('eyelash', '');
+        const lashKey = key.charAt(0).toLowerCase() + key.slice(1);
+        if (lp[lashKey] !== undefined) {
+          slider.value = lp[lashKey];
+          const vd = slider.closest('.slider-control')?.querySelector('.slider-value');
+          if (vd) vd.textContent = lp[lashKey];
+        }
+      });
+    }
+
+    // Restore glasses state
+    if (state.appearance?.glasses && this.glassesSystem) {
+      this.glassesSystem.loadState(state.appearance.glasses);
+      this._syncGlassesUI(state.appearance.glasses);
+    }
+
+    // Restore face mask state
+    if (state.appearance?.faceMask && this.faceMaskSystem) {
+      this.faceMaskSystem.loadState(state.appearance.faceMask);
+      this._syncFaceMaskUI(state.appearance.faceMask);
+    }
+
+    // Restore earring state
+    if (state.appearance?.earrings && this.earringSystem) {
+      this.earringSystem.loadState(state.appearance.earrings);
+      this._syncEarringUI(state.appearance.earrings);
+    }
+
+    // Restore bandana state
+    if (state.appearance?.bandana && this.bandanaSystem) {
+      this.bandanaSystem.loadState(state.appearance.bandana);
+      this._syncBandanaUI(state.appearance.bandana);
+    }
+
+    // Restore eyebrow piercing state
+    if (state.appearance?.browPiercing && this.browPiercingSystem) {
+      this.browPiercingSystem.loadState(state.appearance.browPiercing);
+      this._syncBrowRingUI(state.appearance.browPiercing);
+    }
+
+    // Restore camera state
+    if (state.cameraState) {
+      this.scene.loadCameraState(state.cameraState);
+    }
+
+    this.updatePropertyPanel();
+  }
+
+  // ─── Snapshot Controls ─────────────────────────────────────────────────
+
+  bindSnapshotControls() {
+    if (!this.snapshotManager) return;
+
+    // Capture button
+    document.getElementById('btnCaptureSnapshot')?.addEventListener('click', () => {
+      // Sync all live system state into currentCase before capturing
+      this.updateCaseFromUI();
+      const input = document.getElementById('snapshotNameInput');
+      const name = input ? input.value : '';
+      const snap = this.snapshotManager.capture(name);
+      if (input) input.value = '';
+      this.addHistory(`Snapshot saved: ${snap.name}`);
+    });
+
+    // Allow Enter key in the name input
+    document.getElementById('snapshotNameInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('btnCaptureSnapshot')?.click();
+      }
+    });
+
+    // Clear all button
+    document.getElementById('btnClearSnapshots')?.addEventListener('click', () => {
+      if (!confirm('Delete all snapshots? This cannot be undone.')) return;
+      this.snapshotManager.deleteAll();
+      this.addHistory('All snapshots cleared');
+    });
+
+    // Import snapshot button
+    document.getElementById('btnImportSnapshot')?.addEventListener('click', async () => {
+      const result = await this.snapshotManager.importFromFile();
+      if (result) {
+        this.addHistory(`Snapshot imported: ${result.name}`);
+      }
+    });
+
+    // Re-render list when snapshots change
+    this.snapshotManager.onSnapshotsChanged = (list) => this.renderSnapshotList(list);
+
+    // Initial render
+    this.renderSnapshotList(this.snapshotManager.getList());
+  }
+
+  renderSnapshotList(list) {
+    const container = document.getElementById('snapshotList');
+    const emptyEl = document.getElementById('snapshotEmpty');
+    const countEl = document.getElementById('snapshotCount');
+    const clearBtn = document.getElementById('btnClearSnapshots');
+    if (!container) return;
+
+    // Show/hide empty state, count, and clear button
+    if (emptyEl) emptyEl.style.display = list.length === 0 ? '' : 'none';
+    if (countEl) {
+      countEl.style.display = list.length > 0 ? '' : 'none';
+      countEl.textContent = `${list.length} snapshot${list.length !== 1 ? 's' : ''}`;
+    }
+    if (clearBtn) clearBtn.style.display = list.length > 0 ? '' : 'none';
+
+    // Remove existing cards (keep the empty placeholder)
+    container.querySelectorAll('.snapshot-card').forEach(c => c.remove());
+
+    // Render newest first
+    const sorted = [...list].reverse();
+    sorted.forEach(snap => {
+      const card = document.createElement('div');
+      card.className = 'snapshot-card';
+      card.dataset.snapshotId = snap.id;
+
+      // Thumbnail
+      const thumb = document.createElement('div');
+      thumb.className = 'snapshot-thumb';
+      if (snap.thumbnail) {
+        const img = document.createElement('img');
+        img.src = snap.thumbnail;
+        img.alt = snap.name;
+        thumb.appendChild(img);
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'snapshot-thumb-placeholder';
+        ph.innerHTML = '<i class="fas fa-image"></i>';
+        thumb.appendChild(ph);
+      }
+
+      // Info
+      const info = document.createElement('div');
+      info.className = 'snapshot-info';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'snapshot-name';
+      nameEl.textContent = snap.name;
+      nameEl.title = 'Double-click to rename';
+
+      // Case metadata (if available)
+      const metaEl = document.createElement('div');
+      metaEl.className = 'snapshot-meta';
+      const metaParts = [];
+      if (snap.caseNumber) metaParts.push(`#${snap.caseNumber}`);
+      if (snap.investigator) metaParts.push(`by ${snap.investigator}`);
+      if (metaParts.length > 0) {
+        metaEl.textContent = metaParts.join(' • ');
+      }
+
+      const timeEl = document.createElement('div');
+      timeEl.className = 'snapshot-time';
+      timeEl.textContent = this._formatSnapshotTime(snap.timestamp);
+
+      info.appendChild(nameEl);
+      if (metaParts.length > 0) info.appendChild(metaEl);
+      info.appendChild(timeEl);
+
+      // Actions
+      const actions = document.createElement('div');
+      actions.className = 'snapshot-actions';
+
+      const restoreBtn = document.createElement('button');
+      restoreBtn.className = 'snapshot-action-btn btn-restore';
+      restoreBtn.title = 'Restore this snapshot';
+      restoreBtn.innerHTML = '<i class="fas fa-undo"></i>';
+
+      const exportBtn = document.createElement('button');
+      exportBtn.className = 'snapshot-action-btn btn-export';
+      exportBtn.title = 'Export this snapshot to file';
+      exportBtn.innerHTML = '<i class="fas fa-download"></i>';
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'snapshot-action-btn btn-delete';
+      deleteBtn.title = 'Delete this snapshot';
+      deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+
+      actions.appendChild(restoreBtn);
+      actions.appendChild(exportBtn);
+      actions.appendChild(deleteBtn);
+
+      card.appendChild(thumb);
+      card.appendChild(info);
+      card.appendChild(actions);
+      container.appendChild(card);
+
+      // ── Event handlers ──
+
+      // Restore on card click (not on action buttons or rename input)
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.snapshot-action-btn') || e.target.closest('.snapshot-name-input')) return;
+        this._restoreSnapshot(snap.id, card);
+      });
+
+      // Restore button
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._restoreSnapshot(snap.id, card);
+      });
+
+      // Export button
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.snapshotManager.exportToFile(snap.id);
+        this.addHistory(`Snapshot exported: ${snap.name}`);
+      });
+
+      // Delete button
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.snapshotManager.delete(snap.id);
+        this.addHistory(`Snapshot deleted: ${snap.name}`);
+      });
+
+      // Double-click name to rename
+      nameEl.addEventListener('dblclick', (e) => {
+        this._startSnapshotRename(snap.id, nameEl);
+      });
+    });
+  }
+
+  _restoreSnapshot(id, cardEl) {
+    const state = this.snapshotManager.restore(id);
+    if (!state) return;
+    this.restoreState(state);
+    this.addHistory(`Restored snapshot`);
+
+    // Visual feedback
+    if (cardEl) {
+      cardEl.classList.add('restored');
+      setTimeout(() => cardEl.classList.remove('restored'), 1000);
+    }
+  }
+
+  _startSnapshotRename(id, nameEl) {
+    const currentName = nameEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'snapshot-name-input';
+    input.value = currentName;
+    input.maxLength = 60;
+
+    nameEl.textContent = '';
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = () => {
+      const newName = input.value.trim() || currentName;
+      this.snapshotManager.rename(id, newName);
+      // Re-render handled by onSnapshotsChanged callback
+    };
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+    });
+  }
+
+  _formatSnapshotTime(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+
+    // Same year — show month/day + time
+    const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+    return d.toLocaleDateString(undefined, opts);
+  }
+
+  // Helper: Update hair position sliders to given defaults
+  _updateHairPositionSliders(defaults) {
+    // Map HTML data-param to HairSystem param key
+    const sliderMap = {
+      'hairPosX': 'posx',
+      'hairPosY': 'posy',
+      'hairPosZ': 'posz',
+      'hairRotY': 'roty',
+      'hairScale': 'scale'
+    };
+
+    document.querySelectorAll('.hair-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const key = sliderMap[param];
+      if (key && defaults[key] !== undefined) {
+        slider.value = defaults[key];
+        const vd = control?.querySelector('.slider-value');
+        if (vd) vd.textContent = defaults[key];
+      }
+    });
+  }
+
+  // Helper: Update beard position sliders to given defaults
+  _updateBeardPositionSliders(defaults) {
+    const sliderMap = {
+      'beardScale': 'scale',
+      'beardPosX': 'posX',
+      'beardPosY': 'posY',
+      'beardPosZ': 'posZ',
+      'beardRotX': 'rotX',
+      'beardRotY': 'rotY',
+      'beardRotZ': 'rotZ'
+    };
+
+    document.querySelectorAll('.beard-slider').forEach(slider => {
+      const control = slider.closest('.slider-control');
+      const param = control?.dataset.param;
+      const key = sliderMap[param];
+      if (key && defaults[key] !== undefined) {
+        slider.value = defaults[key];
+        const vd = control?.querySelector('.slider-value');
+        if (vd) vd.textContent = defaults[key];
+      }
+    });
+  }
+
+  formatParamName(param) {
+    return param.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase());
+  }
+
+  formatStyleName(style) {
+    return style.replace(/_/g, ' ').replace(/^./, s => s.toUpperCase());
+  }
+}
+
+window.UIController = UIController;
