@@ -1,0 +1,169 @@
+{
+ "sketch_01.jpg": {
+  "description": "man about 25, long narrow face, messy wavy hair, skinny, light stubble",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "long narrow thin",
+   "hair": "wavy messy medium",
+   "facial_hair": "stubble",
+   "build": "thin skinny"
+  }
+ },
+ "sketch_02.jpg": {
+  "description": "man about 30, oval face, short side-parted hair, clean-shaven, small mole on left cheek",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "oval",
+   "hair": "short side parted straight",
+   "facial_hair": "clean",
+   "marks": "mole"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_03.jpg": {
+  "description": "man about 35, broad square face, short curly hair, full thick beard, heavy eyebrows",
+  "attributes": {
+   "gender": "male",
+   "age": "middle",
+   "face": "broad square wide",
+   "hair": "short curly",
+   "facial_hair": "full beard thick",
+   "brows": "thick heavy"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_04.jpg": {
+  "description": "man about 40, round chubby face, double chin, receding hairline, thick moustache",
+  "attributes": {
+   "gender": "male",
+   "age": "middle",
+   "face": "round chubby fat",
+   "hair": "receding short",
+   "facial_hair": "thick moustache",
+   "build": "heavy fat stout"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_05.jpg": {
+  "description": "man about 28, thin face, bowl cut with fringe, big ears, thin moustache",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "thin narrow small",
+   "hair": "bowl cut fringe straight",
+   "facial_hair": "thin moustache",
+   "ears": "big large"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_06.jpg": {
+  "description": "man about 45, long face, short cropped grey hair, deep forehead wrinkles, stubble, sunken cheeks",
+  "attributes": {
+   "gender": "male",
+   "age": "middle older",
+   "face": "long thin",
+   "hair": "short cropped grey",
+   "facial_hair": "stubble",
+   "marks": "wrinkles",
+   "build": "thin"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_07.jpg": {
+  "description": "man about 65, bald head with grey hair at the sides, heavy wrinkles, grey stubble, drooping eyes",
+  "attributes": {
+   "gender": "male",
+   "age": "older old",
+   "face": "oval wrinkled",
+   "hair": "bald balding grey",
+   "facial_hair": "grey stubble",
+   "marks": "wrinkles"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_08.jpg": {
+  "description": "man about 30, angular face, wearing a baseball cap, goatee beard and thin moustache",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "angular sharp",
+   "hair": "short",
+   "facial_hair": "goatee moustache",
+   "headwear": "cap baseball cap"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_09.jpg": {
+  "description": "man about 35, shaved bald head, thick handlebar moustache, small scar under right eye, stud earring",
+  "attributes": {
+   "gender": "male",
+   "age": "middle",
+   "face": "oval",
+   "hair": "bald shaved",
+   "facial_hair": "thick moustache",
+   "marks": "scar",
+   "other": "earring"
+  }
+ },
+ "sketch_10.jpg": {
+  "description": "man about 40, square face, short straight hair, rectangular spectacles, trimmed beard",
+  "attributes": {
+   "gender": "male",
+   "age": "middle",
+   "face": "square",
+   "hair": "short straight",
+   "facial_hair": "short beard trimmed",
+   "eyewear": "spectacles glasses square"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_11.jpg": {
+  "description": "man about 50, Sikh turban, long full grey beard, broad face, thick eyebrows",
+  "attributes": {
+   "gender": "male",
+   "age": "older middle",
+   "face": "broad wide",
+   "hair": "covered",
+   "facial_hair": "long full beard grey",
+   "headwear": "turban pagdi",
+   "brows": "thick"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_12.jpg": {
+  "description": "man about 22, slim face, curly shoulder-length hair, acne marks on cheeks, clean-shaven",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "slim thin",
+   "hair": "curly long shoulder",
+   "facial_hair": "clean",
+   "marks": "acne pockmarks spots"
+  }
+ },
+ "sketch_13.jpg": {
+  "description": "man about 38, heavy-set, round face, short spiky hair, thick neck, light moustache",
+  "attributes": {
+   "gender": "male",
+   "age": "middle",
+   "face": "round fat",
+   "hair": "short spiky",
+   "facial_hair": "moustache",
+   "build": "heavy fat stout"
+  },
+  "provider": "pollinations"
+ },
+ "sketch_14.jpg": {
+  "description": "man about 33, long face, long wavy hair to the shoulders, long full beard",
+  "attributes": {
+   "gender": "male",
+   "age": "middle young",
+   "face": "long",
+   "hair": "long wavy",
+   "facial_hair": "long full beard"
+  },
+  "provider": "pollinations"
+ }
+}

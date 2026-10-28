@@ -1,0 +1,358 @@
+{
+  "spectacles_round": {
+    "file": "spectacles_round.png",
+    "name": "Round spectacles",
+    "region": "eyes",
+    "anchor_landmarks": [
+      33,
+      263
+    ],
+    "png_anchors": [
+      [
+        86,
+        128
+      ],
+      [
+        426,
+        128
+      ]
+    ],
+    "scale": 1.0,
+    "offset": [
+      0.0,
+      0.0
+    ],
+    "blend": "normal"
+  },
+  "spectacles_square": {
+    "file": "spectacles_square.png",
+    "name": "Square spectacles",
+    "region": "eyes",
+    "anchor_landmarks": [
+      33,
+      263
+    ],
+    "png_anchors": [
+      [
+        86,
+        128
+      ],
+      [
+        426,
+        128
+      ]
+    ],
+    "scale": 1.0,
+    "offset": [
+      0.0,
+      0.0
+    ],
+    "blend": "normal"
+  },
+  "cap": {
+    "file": "cap.png",
+    "name": "Cap",
+    "region": "hair",
+    "anchor_landmarks": [
+      127,
+      356
+    ],
+    "png_anchors": [
+      [
+        60,
+        200
+      ],
+      [
+        452,
+        200
+      ]
+    ],
+    "scale": 1.05,
+    "offset": [
+      0.0,
+      -0.42
+    ],
+    "blend": "normal"
+  },
+  "turban": {
+    "file": "turban.png",
+    "name": "Turban",
+    "region": "hair",
+    "anchor_landmarks": [
+      127,
+      356
+    ],
+    "png_anchors": [
+      [
+        40,
+        210
+      ],
+      [
+        472,
+        210
+      ]
+    ],
+    "scale": 1.15,
+    "offset": [
+      0.0,
+      -0.45
+    ],
+    "blend": "normal"
+  },
+  "helmet": {
+    "file": "helmet.png",
+    "name": "Helmet",
+    "region": "hair",
+    "anchor_landmarks": [
+      127,
+      356
+    ],
+    "png_anchors": [
+      [
+        40,
+        215
+      ],
+      [
+        472,
+        215
+      ]
+    ],
+    "scale": 1.2,
+    "offset": [
+      0.0,
+      -0.35
+    ],
+    "blend": "normal"
+  },
+  "face_cloth": {
+    "file": "face_cloth.png",
+    "name": "Face cloth",
+    "region": "mouth",
+    "anchor_landmarks": [
+      234,
+      454
+    ],
+    "png_anchors": [
+      [
+        30,
+        40
+      ],
+      [
+        482,
+        40
+      ]
+    ],
+    "scale": 1.0,
+    "offset": [
+      0.0,
+      0.12
+    ],
+    "blend": "normal"
+  },
+  "moustache_thin": {
+    "file": "moustache_thin.png",
+    "name": "Thin moustache",
+    "region": "hair",
+    "anchor_landmarks": [
+      61,
+      291
+    ],
+    "png_anchors": [
+      [
+        96,
+        150
+      ],
+      [
+        416,
+        150
+      ]
+    ],
+    "scale": 1.1,
+    "offset": [
+      0.0,
+      -0.28
+    ],
+    "blend": "normal"
+  },
+  "moustache_thick": {
+    "file": "moustache_thick.png",
+    "name": "Thick moustache",
+    "region": "hair",
+    "anchor_landmarks": [
+      61,
+      291
+    ],
+    "png_anchors": [
+      [
+        96,
+        150
+      ],
+      [
+        416,
+        150
+      ]
+    ],
+    "scale": 1.2,
+    "offset": [
+      0.0,
+      -0.3
+    ],
+    "blend": "normal"
+  },
+  "beard_short": {
+    "file": "beard_short.png",
+    "name": "Short beard",
+    "region": "hair",
+    "anchor_landmarks": [
+      172,
+      397
+    ],
+    "png_anchors": [
+      [
+        70,
+        60
+      ],
+      [
+        442,
+        60
+      ]
+    ],
+    "scale": 1.05,
+    "offset": [
+      0.0,
+      0.0
+    ],
+    "blend": "multiply"
+  },
+  "beard_full": {
+    "file": "beard_full.png",
+    "name": "Full beard",
+    "region": "hair",
+    "anchor_landmarks": [
+      172,
+      397
+    ],
+    "png_anchors": [
+      [
+        60,
+        50
+      ],
+      [
+        452,
+        50
+      ]
+    ],
+    "scale": 1.15,
+    "offset": [
+      0.0,
+      0.05
+    ],
+    "blend": "normal"
+  },
+  "scar": {
+    "file": "scar.png",
+    "name": "Scar",
+    "region": "marks",
+    "positional": true,
+    "positions": {
+      "left_cheek": 280,
+      "right_cheek": 50,
+      "forehead": 151,
+      "chin": 199
+    },
+    "ref_landmarks": [
+      33,
+      263
+    ],
+    "ref_scale": 0.35,
+    "png_anchors": [
+      [
+        128,
+        128
+      ],
+      [
+        384,
+        128
+      ]
+    ],
+    "blend": "multiply"
+  },
+  "mole": {
+    "file": "mole.png",
+    "name": "Mole",
+    "region": "marks",
+    "positional": true,
+    "positions": {
+      "left_cheek": 280,
+      "right_cheek": 50,
+      "forehead": 151,
+      "chin": 199
+    },
+    "ref_landmarks": [
+      33,
+      263
+    ],
+    "ref_scale": 0.08,
+    "png_anchors": [
+      [
+        128,
+        128
+      ],
+      [
+        384,
+        128
+      ]
+    ],
+    "blend": "multiply"
+  },
+  "tilak": {
+    "file": "tilak.png",
+    "name": "Tilak",
+    "region": "marks",
+    "positional": true,
+    "positions": {
+      "forehead": 9
+    },
+    "ref_landmarks": [
+      33,
+      263
+    ],
+    "ref_scale": 0.12,
+    "png_anchors": [
+      [
+        128,
+        128
+      ],
+      [
+        384,
+        128
+      ]
+    ],
+    "blend": "normal"
+  },
+  "earring": {
+    "file": "earring.png",
+    "name": "Earrings",
+    "region": "ears",
+    "anchor_landmarks": [
+      132,
+      361
+    ],
+    "png_anchors": [
+      [
+        40,
+        60
+      ],
+      [
+        472,
+        60
+      ]
+    ],
+    "scale": 1.0,
+    "offset": [
+      0.0,
+      0.0
+    ],
+    "blend": "normal"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "template": "room",
+  "room": {
+    "width_m": 4.0,
+    "depth_m": 4.0,
+    "doors": [
+      {
+        "id": "door",
+        "wall": "south",
+        "offset_m": 0.8,
+        "width_m": 0.9
+      }
+    ],
+    "windows": [
+      {
+        "id": "window",
+        "wall": "north",
+        "offset_m": 2.0,
+        "width_m": 1.2
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "bed",
+      "type": "bed",
+      "pos": [
+        3.0,
+        0.0,
+        1.5
+      ],
+      "rot_y_deg": 0.0,
+      "size": [
+        1.5,
+        0.5,
+        2.0
+      ],
+      "locked": false
+    },
+    {
+      "id": "table",
+      "type": "table",
+      "pos": [
+        1.0,
+        0.0,
+        3.25
+      ],
+      "rot_y_deg": 0.0,
+      "size": [
+        1.0,
+        0.75,
+        0.6
+      ],
+      "locked": false
+    },
+    {
+      "id": "cupboard",
+      "type": "cupboard",
+      "pos": [
+        0.5,
+        0.0,
+        1.0
+      ],
+      "rot_y_deg": 0.0,
+      "size": [
+        0.6,
+        2.0,
+        1.2
+      ],
+      "locked": false
+    }
+  ],
+  "people": [],
+  "evidence": [],
+  "lighting": {
+    "type": "indoor",
+    "level": "normal",
+    "sources": [
+      "ceiling light"
+    ]
+  },
+  "events": []
+}

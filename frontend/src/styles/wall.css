@@ -1,0 +1,351 @@
+/*
+  Shared evidence-wall kit for every application screen.
+  Rules: nothing is a flat dark box; every panel/label/card is torn manila paper pinned to the
+  wall. Corners are square (2px max). Red is the only accent: selected = thin red outline +
+  red pin, active = red fill, warning = red stamp. No gradients except the lamp glow.
+*/
+
+/* ---- the wall --------------------------------------------------------------------- */
+.board {
+  --ring-i: 14px;
+  --ring-d: 34px;
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  overflow-x: clip;
+  color: var(--wall-text);
+}
+.board-wall {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(ellipse 48% 42% at 0% 0%, var(--lamp), transparent 72%),
+    var(--felt),
+    var(--wall);
+}
+.board-strings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  overflow: visible;
+}
+.board-strings path {
+  fill: none;
+  stroke: var(--string);
+  stroke-width: var(--string-w);
+  stroke-linecap: round;
+  stroke-opacity: 0.9;
+}
+.board-strings path.thin {
+  stroke-width: 1.4px;
+  stroke-opacity: 0.75;
+}
+.board-ring {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.board-ring .pin {
+  position: absolute;
+  margin: calc(var(--pin-size) / -2) 0 0 calc(var(--pin-size) / -2);
+}
+
+/* ---- pins ------------------------------------------------------------------------- */
+.pin {
+  position: absolute;
+  top: calc(var(--pin-size) / -2 + 1px);
+  width: var(--pin-size);
+  height: var(--pin-size);
+  margin-left: calc(var(--pin-size) / -2);
+  border-radius: 50%;
+  background: var(--pin);
+  box-shadow:
+    1px 2px 2px rgba(0, 0, 0, 0.5),
+    inset -1px -1px 0 rgba(20, 18, 15, 0.35);
+  z-index: 3;
+  pointer-events: none;
+}
+.pin::after {
+  content: "";
+  position: absolute;
+  left: 2.5px;
+  top: 2px;
+  width: 4px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--manila);
+  opacity: 0.6;
+}
+.pin-ink {
+  background: var(--ink);
+}
+.pin-ink::after {
+  opacity: 0.35;
+}
+.pin-red {
+  background: var(--pin);
+}
+
+/* ---- paper ------------------------------------------------------------------------- */
+.paper {
+  position: relative;
+  transform: rotate(var(--rot, 0deg));
+  filter: var(--paper-shadow);
+}
+.paper-body {
+  position: relative;
+  background-color: var(--manila);
+  background-size:
+    100% 100%,
+    160px 160px;
+  color: var(--ink);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+}
+.paper.is-selected > .paper-body {
+  box-shadow: inset 0 0 0 1.5px var(--string);
+}
+.paper.is-selected {
+  z-index: 2;
+  transform: rotate(var(--rot, 0deg)) translateY(-2px) scale(1.012);
+}
+
+/* vintage typewriter ink (English paper text only; never on Kannada / Hindi).
+   A faint bleed via text-shadow: cheap to paint, unlike an SVG turbulence filter. */
+.ink {
+  text-shadow:
+    0 0 0.6px rgba(20, 18, 15, 0.55),
+    0.4px 0.3px 0 rgba(20, 18, 15, 0.18);
+}
+:lang(kn) .ink,
+:lang(hi) .ink,
+.ink:lang(kn),
+.ink:lang(hi) {
+  text-shadow: none;
+}
+
+/* torn strips */
+.strip > .paper-body {
+  padding: 10px 16px 9px;
+  font-family: var(--font-type);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.92rem;
+}
+
+/* ---- stamps (solid red fill, misregistered ghost) --------------------------------- */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--touch);
+  padding: 6px 16px;
+  background: var(--string);
+  color: var(--manila);
+  border-radius: var(--radius);
+  transform: rotate(var(--rot, 0deg));
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+  font-family: var(--font-type);
+  font-size: 1.5rem; /* large text: >= 3:1 on red */
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 0;
+  clip-path: polygon(0 4%, 3% 0, 97% 2%, 100% 0, 99% 50%, 100% 96%, 96% 100%, 2% 98%, 0 100%, 1% 50%);
+}
+.stamp-text {
+  text-shadow: 0.6px 0.6px 0 rgba(20, 18, 15, 0.38);
+}
+button.stamp {
+  cursor: pointer;
+}
+button.stamp:focus-visible {
+  outline: 2px solid var(--wall-text);
+  outline-offset: 4px;
+}
+
+/* ---- buttons ------------------------------------------------------------------------ */
+.ink-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: var(--touch);
+  min-width: var(--touch);
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  font-family: var(--font-type);
+  font-size: 0.95rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.ink-btn:hover:not(:disabled) {
+  background: rgba(20, 18, 15, 0.06);
+}
+.ink-btn:focus-visible {
+  outline: 2px solid var(--string);
+  outline-offset: 2px;
+}
+.ink-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ink-btn.is-selected {
+  border-color: var(--string);
+  box-shadow: inset 0 0 0 1px var(--string);
+}
+.ink-btn-solid {
+  background: var(--ink);
+  color: var(--manila);
+}
+.ink-btn-solid:hover:not(:disabled) {
+  background: #2a2622;
+}
+.ink-btn-solid .ink {
+  text-shadow: none;
+}
+.ink-btn-wall {
+  color: var(--wall-text);
+  border-color: rgba(216, 210, 196, 0.6);
+}
+.ink-btn-wall .ink {
+  text-shadow: none;
+}
+.ink-btn-wall:hover:not(:disabled) {
+  background: rgba(216, 210, 196, 0.06);
+}
+.ink-btn-block {
+  width: 100%;
+}
+
+/* ---- form fields on paper ------------------------------------------------------------ */
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.field > label,
+.field-label {
+  font-family: var(--font-type);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.field input,
+.field select,
+.field textarea,
+.paper-input {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--ink);
+  border: 1px solid rgba(20, 18, 15, 0.55);
+  border-radius: var(--radius);
+  font-family: var(--font-type);
+  font-size: 1rem;
+}
+.field textarea,
+textarea.paper-input {
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus,
+.paper-input:focus {
+  outline: 2px solid var(--string);
+  outline-offset: 1px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--touch);
+  font-family: var(--font-type);
+  font-size: 0.92rem;
+}
+.check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--string);
+}
+
+/* ---- wall text ------------------------------------------------------------------------ */
+.wall-note {
+  color: var(--wall-text);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.typed {
+  font-family: var(--font-type);
+}
+.kn,
+:lang(kn) {
+  font-family: var(--font-kn);
+}
+.hand {
+  font-family: var(--font-hand);
+}
+
+/* red rubber-stamp message on paper (warnings) */
+.paper-stamp {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 2px solid var(--string);
+  color: var(--string);
+  font-family: var(--font-type);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 1.15rem;
+  transform: rotate(-2deg);
+}
+.error-note {
+  color: var(--ink);
+  border-left: 3px solid var(--string);
+  padding: 6px 10px;
+  margin: 8px 0;
+  font-size: 0.95rem;
+}
+
+/* polaroid holder for thumbnails */
+.polaroid {
+  background: var(--manila);
+  padding: 5px 5px 14px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+  transform: rotate(var(--rot, 0deg));
+}
+.polaroid-window {
+  display: block;
+  background: #d9c89b;
+  aspect-ratio: 5 / 6;
+  width: 100%;
+  overflow: hidden;
+}
+.polaroid-window img {
+  mix-blend-mode: multiply;
+}
+.polaroid-window > svg,
+.polaroid-window > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
