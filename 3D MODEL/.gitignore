@@ -1,0 +1,12 @@
+node_modules/
+dist/
+backend/exports/
+backend/cases/
+*.pyc
+__pycache__/
+.env
+.claude/
+venv/
+DEMO_SCRIPT.md
+upload.txt
+

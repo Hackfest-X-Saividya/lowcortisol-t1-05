@@ -1,0 +1,909 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Nishaan — Form Controls & Sliders
+   Custom styled inputs for the forensic UI
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ─── Slider Controls ───────────────────────────────────────────────── */
+
+.slider-control {
+  margin-bottom: 10px;
+}
+
+.slider-control:last-child {
+  margin-bottom: 0;
+}
+
+.slider-control label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.slider-value {
+  min-width: 26px;
+  text-align: right;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--rf-accent-gold);
+  font-weight: 600;
+  padding: 2px 6px;
+  background: rgba(201, 169, 110, 0.1);
+  border-radius: 4px;
+  border: 1px solid rgba(201, 169, 110, 0.2);
+}
+
+.slider-label-left,
+.slider-label-right {
+  font-size: 9px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+
+/* Custom range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  background: linear-gradient(90deg, var(--bg-primary) 0%, var(--bg-elevated) 100%);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: all var(--transition-fast);
+}
+
+input[type="range"]:hover {
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4),
+              0 0 8px rgba(201, 169, 110, 0.2);
+}
+
+/* Track */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--rf-accent-gold) 0%,
+    var(--rf-accent-gold) var(--slider-fill, 50%),
+    transparent var(--slider-fill, 50%)
+  );
+}
+
+/* Thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--text-primary) 0%, #d0d0e0 100%);
+  border: 2px solid var(--rf-accent-gold);
+  margin-top: -6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4),
+              0 0 8px rgba(201, 169, 110, 0.3);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: linear-gradient(135deg, var(--rf-accent-gold-bright) 0%, var(--rf-accent-gold) 100%);
+  border-color: var(--rf-accent-gold-bright);
+  transform: scale(1.25);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5),
+              0 0 16px rgba(201, 169, 110, 0.5);
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  background: var(--rf-accent-gold);
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6),
+              0 0 20px rgba(201, 169, 110, 0.6);
+}
+
+/* Morph slider color variation */
+.morph-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #a8844a, var(--rf-accent-gold));
+}
+
+.hair-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #a8844a, var(--rf-accent-gold-bright));
+}
+
+.appearance-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #a8844a, var(--rf-accent-gold));
+}
+
+.skin-texture-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #8b6914, #d4a574);
+}
+
+.eyebrow-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #a8844a, var(--rf-accent-gold));
+}
+
+/* ─── Select Controls ───────────────────────────────────────────────── */
+
+.select-control {
+  margin-bottom: 12px;
+}
+
+.select-control label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.custom-select {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237da3f7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.custom-select:hover {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(201, 169, 110, 0.2);
+}
+
+.custom-select:focus {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.2),
+              0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.custom-select option {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 6px;
+}
+
+/* ─── Text Inputs ───────────────────────────────────────────────────── */
+
+.input-control {
+  margin-bottom: 12px;
+}
+
+.input-control label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.text-input {
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 11px;
+  outline: none;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.text-input::placeholder {
+  color: var(--text-muted);
+}
+
+.text-input:hover {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(201, 169, 110, 0.2);
+}
+
+.text-input:focus {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.2),
+              0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.text-area {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 11px;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.text-area::placeholder {
+  color: var(--text-muted);
+}
+
+.text-area:hover {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(201, 169, 110, 0.2);
+}
+
+.text-area:focus {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 0 3px rgba(201, 169, 110, 0.2),
+              0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Checkbox ──────────────────────────────────────────────────────── */
+
+.checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.checkbox-control input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-accent);
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.checkbox-control input[type="checkbox"]:hover {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(201, 169, 110, 0.2);
+}
+
+.checkbox-control input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, var(--rf-accent-gold) 0%, #a8844a 100%);
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 2px 6px rgba(201, 169, 110, 0.4),
+              0 0 12px rgba(201, 169, 110, 0.3);
+}
+
+.checkbox-control input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.checkbox-control label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+/* ─── Slider fill update via JS ─────────────────────────────────────── */
+
+/* We use a CSS gradient trick for the filled portion of the slider track.
+   This is updated dynamically when the slider value changes. */
+
+/* ─── Face Point Editor Controls ────────────────────────────────────── */
+
+.edit-points-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(201, 169, 110, 0.08) 0%, rgba(201, 169, 110, 0.03) 100%);
+  border-radius: 6px;
+  border-left: 3px solid var(--rf-accent-gold);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.edit-points-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.edit-points-controls .btn {
+  flex: 1;
+  min-width: 110px;
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 10.5px;
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, var(--rf-accent-gold) 0%, #a8844a 100%);
+  color: #ffffff;
+  border: 1px solid var(--rf-accent-gold);
+  font-weight: 600;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(201, 169, 110, 0.3);
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, var(--rf-accent-gold-bright) 0%, var(--rf-accent-gold) 100%);
+  border-color: var(--rf-accent-gold-bright);
+  box-shadow: 0 4px 12px rgba(201, 169, 110, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-accent.active {
+  background: linear-gradient(135deg, var(--accent-danger) 0%, #e65878 100%);
+  border-color: var(--accent-danger);
+  box-shadow: 0 0 16px rgba(250, 122, 152, 0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+#btnEditPoints.active {
+  background: linear-gradient(135deg, var(--rf-accent-gold) 0%, #a8844a 100%);
+  color: #ffffff;
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 16px rgba(201, 169, 110, 0.4);
+}
+
+#btnTogglePointEdit.active {
+  background: linear-gradient(135deg, var(--accent-danger) 0%, #e65878 100%);
+  border-color: var(--accent-danger);
+}
+
+#btnTogglePointEdit.active i::before {
+  content: '\f00d';  /* fa-times */
+}
+
+/* ─── Skin Mark Controls ───────────────────────────────────────────── */
+
+#btnToggleSkinMarks.active {
+  background: var(--accent-danger);
+  border-color: var(--accent-danger);
+}
+
+#btnSkinMarks.active {
+  background: var(--rf-accent-gold);
+  color: var(--bg-primary);
+  border-color: var(--rf-accent-gold);
+}
+
+#skinMarkProperties {
+  border-top: 1px solid var(--border-accent);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+/* ─── Wrinkle Painter Controls ────────────────────────────────────── */
+
+#btnWrinklePaint.active {
+  background: var(--rf-accent-gold);
+  color: var(--bg-primary);
+  border-color: var(--rf-accent-gold);
+}
+
+#btnToggleWrinklePaint.active {
+  background: var(--accent-danger);
+  border-color: var(--accent-danger);
+}
+
+#btnWrinkleErase.active {
+  background: var(--accent-warning, #e6a817);
+  border-color: var(--accent-warning, #e6a817);
+  color: var(--bg-primary);
+}
+
+#wrinklePaintControls {
+  border-top: 1px solid var(--border-accent);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+/* ─── Lip Painter Controls ─────────────────────────────────────────── */
+
+#btnLipPaint.active,
+#btnToggleLipPaint.active {
+  background: var(--rf-accent-gold);
+  color: var(--bg-primary);
+  border-color: var(--rf-accent-gold);
+}
+
+#btnLipErase.active {
+  background: var(--accent-warning, #e6a817);
+  border-color: var(--accent-warning, #e6a817);
+  color: var(--bg-primary);
+}
+
+/* ─── Decal System Controls ───────────────────────────────────────── */
+
+#btnDecals.active {
+  background: var(--rf-accent-gold);
+  color: var(--bg-primary);
+  border-color: var(--rf-accent-gold);
+}
+
+#btnToggleDecalPlace.active {
+  background: var(--accent-danger);
+  border-color: var(--accent-danger);
+}
+
+#decalProperties {
+  border-top: 1px solid var(--border-accent);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+.decal-texture-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.decal-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 2px solid var(--border-primary);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--bg-tertiary);
+}
+
+.decal-thumb:hover {
+  border-color: var(--text-secondary);
+  transform: scale(1.05);
+}
+
+.decal-thumb.active {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 8px rgba(201, 169, 110, 0.4);
+}
+
+.decal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ─── Glasses Gallery ─────────────────────────────────────────────── */
+
+.glasses-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.glasses-item {
+  width: 100%;
+  aspect-ratio: 1.5;
+  border-radius: 6px;
+  border: 2px solid var(--border-primary);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.glasses-item:hover {
+  border-color: var(--text-secondary);
+  transform: scale(1.05);
+}
+
+.glasses-item.active {
+  border-color: var(--rf-accent-gold);
+  box-shadow: 0 0 8px rgba(201, 169, 110, 0.4);
+}
+
+.glasses-item .glasses-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  padding: 8px;
+}
+
+.glasses-item .glasses-name {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--text-primary);
+  font-size: 8px;
+  text-align: center;
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#glassesProperties {
+  border-top: 1px solid var(--border-accent);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+/* ─── Import Model ─────────────────────────────────────────────────── */
+
+.control-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.btn-danger {
+  color: #ff6b6b !important;
+  border-color: #ff6b6b !important;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 107, 107, 0.15) !important;
+}
+
+.imported-models-list {
+  margin-top: 6px;
+}
+
+/* ─── Age Progression Cards ─────────────────────────────────────────── */
+
+.age-progression-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(18, 20, 30, 0.98);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+  overflow-y: auto;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.age-progression-container {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  width: 100%;
+  max-height: 100%;
+  overflow: visible;
+  animation: slideDown 0.3s ease-out;
+  padding-top: 10px;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.age-progression-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(201, 169, 110, 0.15) 0%, rgba(201, 169, 110, 0.08) 100%);
+  border-bottom: 1px solid var(--border-accent);
+  border-radius: 8px 8px 0 0;
+  margin: 0 10px;
+}
+
+.age-progression-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.age-progression-header h3 i {
+  color: var(--rf-accent-gold);
+  font-size: 16px;
+}
+
+.btn-close-overlay {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-close-overlay:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.age-progression-content {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.age-progression-desc {
+  margin: 0 0 14px 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.age-progression-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.age-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 12px 14px;
+  gap: 12px;
+  border: 2px solid var(--border-accent);
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.age-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(201, 169, 110, 0.05) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.age-card:hover {
+  border-color: var(--rf-accent-gold);
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3),
+              0 0 0 1px rgba(201, 169, 110, 0.3);
+}
+
+.age-card:hover::before {
+  opacity: 1;
+}
+
+.age-card.active {
+  border-color: var(--rf-accent-gold);
+  background: linear-gradient(135deg, rgba(201, 169, 110, 0.2) 0%, rgba(201, 169, 110, 0.1) 100%);
+  box-shadow: 0 4px 12px rgba(201, 169, 110, 0.4),
+              0 0 0 2px rgba(201, 169, 110, 0.4);
+}
+
+.age-card.active::before {
+  opacity: 1;
+  background: linear-gradient(135deg, rgba(201, 169, 110, 0.1) 0%, transparent 100%);
+}
+
+.age-card i {
+  font-size: 24px;
+  color: var(--rf-accent-gold);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.age-card:hover i {
+  color: var(--rf-accent-gold-bright);
+  transform: scale(1.1);
+}
+
+.age-card.active i {
+  color: var(--rf-accent-gold-bright);
+}
+
+.age-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.age-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.age-desc {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.age-progression-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.btn-reset-age {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-secondary) 100%);
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  flex: 1;
+  justify-content: center;
+}
+
+.btn-reset-age:hover {
+  background: linear-gradient(135deg, var(--rf-accent-gold) 0%, #a8844a 100%);
+  border-color: var(--rf-accent-gold);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(201, 169, 110, 0.3);
+  color: #ffffff;
+}
+
+.btn-reset-age i {
+  font-size: 12px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   PHASE 8 — Slider Track Deep Polish (dynamic fill via --fill-pct)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Base track override — uses JS-driven --fill-pct for all range inputs */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--rf-accent-gold) 0%,
+    var(--rf-accent-gold) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) 100%
+  );
+}
+
+/* Morph sliders — standard gold fill */
+.morph-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--rf-accent-gold) 0%,
+    var(--rf-accent-gold) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) 100%
+  );
+}
+
+/* Hair sliders — gold-bright fill */
+.hair-slider::-webkit-slider-runnable-track,
+.beard-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--rf-accent-gold-bright) 0%,
+    var(--rf-accent-gold-bright) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) 100%
+  );
+}
+
+/* Eye / Eyebrow / Eyelash sliders — subtle purple accent */
+.eye-slider::-webkit-slider-runnable-track,
+.eyebrow-slider::-webkit-slider-runnable-track,
+.eyelash-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    rgba(140, 115, 200, 0.80) 0%,
+    rgba(140, 115, 200, 0.80) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) 100%
+  );
+}
+
+.eye-slider::-webkit-slider-thumb,
+.eyebrow-slider::-webkit-slider-thumb,
+.eyelash-slider::-webkit-slider-thumb {
+  border-color: rgba(140, 115, 200, 0.90);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), 0 0 8px rgba(140, 115, 200, 0.35);
+}
+
+.eye-slider::-webkit-slider-thumb:hover,
+.eyebrow-slider::-webkit-slider-thumb:hover,
+.eyelash-slider::-webkit-slider-thumb:hover {
+  border-color: rgba(170, 145, 230, 1.0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 14px rgba(140, 115, 200, 0.55);
+}
+
+/* Appearance / skin-texture sliders — muted gold */
+.appearance-slider::-webkit-slider-runnable-track,
+.skin-texture-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    rgba(201, 169, 110, 0.70) 0%,
+    rgba(201, 169, 110, 0.70) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) var(--fill-pct, 50%),
+    var(--rf-bg-overlay) 100%
+  );
+}
+

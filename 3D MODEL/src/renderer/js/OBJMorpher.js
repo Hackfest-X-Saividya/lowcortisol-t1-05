@@ -1,0 +1,1090 @@
+/**
+ * OBJMorpher.js
+ * Landmark-based vertex deformation for loaded GLB/OBJ face meshes.
+ * Ported from the proven Python FaceDeformer logic with Gaussian weight
+ * falloff, smooth directional functions, and face mask boundaries.
+ *
+ * Coordinate system: Y-up (glTF standard)
+ *   X = left(-) / right(+)
+ *   Y = down(-) / up(+)  (height)
+ *   Z = back(-) / front(+)  (positive Z = face front / nose tip)
+ */
+
+class OBJMorpher {
+  constructor() {
+    this.meshGroup = null;
+    this.originalPositions = [];
+    this.meshes = [];
+    this.vertexOffsets = [];
+    this.totalVertices = 0;
+
+    this._allVerts = null;
+    this._faceMask = null;
+    this._landmarkIndices = {};
+    this._landmarkPositions = {};
+    this._landmarkSnapDistance = {};   // name -> distance from the authored point
+
+    this.onMorphApplied = null;
+    this.skinMarkSystem = null; // Reference to SkinMarkSystem for mark repositioning
+
+    this.defaultValue = 50;
+    this.morphValues = {};
+
+    this.regionData = null;
+    this.perVertexRegion = null;
+
+    this.params = [
+      'faceWidth', 'faceLength', 'headWidth', 'headLength', 'faceTaper',
+      'foreheadHeight', 'foreheadSlope', 'foreheadWidth', 'templeWidth', 'foreheadBulge',
+      'browHeight', 'browSpacing', 'browProminence', 'browArch', 'browThickness',
+      'eyeSpacing', 'eyeHeight', 'eyeDepth', 'eyeSize', 'eyeTilt', 'eyeOpenness',
+      'noseLength', 'noseWidth', 'noseBridgeWidth', 'noseBridgeHeight',
+      'noseTipHeight', 'noseTipWidth', 'nostrilFlare',
+      'cheekFullness', 'cheekboneProminence', 'cheekHeight', 'nasolabialDepth',
+      'mouthWidth', 'mouthHeight', 'lipProtrusion',
+      'upperLipThickness', 'lowerLipThickness',
+      'cupidBow', 'philtrumDepth', 'philtrumWidth', 'lipCornerAngle',
+      'jawWidth', 'chinHeight', 'chinWidth', 'chinProtrusion', 'jawDefinition',
+      'earSize', 'earProtrusion', 'earHeight', 'earlobeSize',
+      // Driven only by MakeHuman targets (head_morphs.json)
+      'eyeBags', 'epicanthicFold', 'noseCurve', 'chinCleft', 'doubleChin',
+      // Whole-head macros: age in years, sex 0 = female .. 100 = male,
+      // ancestry weights (normalised when applied), body weight and muscle
+      'age', 'sex', 'ancestryAfrican', 'ancestryAsian', 'ancestryCaucasian',
+      'bodyWeight', 'muscle',
+    ];
+    // Per-parameter neutral value (everything else is 50). The macro defaults
+    // match the base mesh: a 25-year-old male of mixed ancestry.
+    this.paramDefaults = {
+      chinCleft: 0,
+      age: 25, sex: 100,
+      ancestryAfrican: 33, ancestryAsian: 33, ancestryCaucasian: 33,
+    };
+    this.params.forEach(p => this.morphValues[p] = this.getDefault(p));
+
+    this._morph = null;            // MakeHuman target deltas (see setMorphData)
+  }
+
+  static get MODEL_CONFIG() {
+    return {
+      face_y_min: -1.059,
+      face_y_max:  1.315,
+      scale_factor: 0.19,
+      z_front_direction: 1,
+      radius_scale: 3.5,
+      transition_width: 0.075,
+      boundary_falloff: 0.19,
+    };
+  }
+
+  // Measured on the MakeHuman-based head.glb (see assets/models/CREDITS.md).
+  static get LANDMARKS() {
+    return {
+      chin:             [0.000, -0.899, 1.205],
+      chin_left:        [-0.140, -0.835, 1.182],
+      chin_right:       [0.140, -0.835, 1.182],
+      jaw_left:         [-0.454, -0.739, 0.946],
+      jaw_right:        [0.454, -0.739, 0.946],
+      jaw_angle_left:   [-0.616, -0.702, 0.581],
+      jaw_angle_right:  [0.616, -0.702, 0.581],
+
+      cheek_left:         [-0.403, -0.479, 1.081],
+      cheek_right:        [0.403, -0.479, 1.081],
+      cheekbone_left:     [-0.519, -0.205, 1.041],
+      cheekbone_right:    [0.519, -0.205, 1.041],
+      lower_cheek_left:   [-0.346, -0.605, 1.118],
+      lower_cheek_right:  [0.346, -0.605, 1.118],
+
+      nose_tip:           [0.000, -0.278, 1.400],
+      nose_bridge:        [0.000, 0.102, 1.187],
+      nose_bridge_top:    [0.000, 0.229, 1.194],
+      nostril_left:       [-0.091, -0.368, 1.250],
+      nostril_right:      [0.091, -0.368, 1.250],
+      nose_base:          [-0.000, -0.395, 1.286],
+      alar_left:          [-0.143, -0.317, 1.287],
+      alar_right:         [0.143, -0.317, 1.287],
+
+      eye_left_outer:     [-0.455, 0.202, 1.099],
+      eye_left_inner:     [-0.132, 0.205, 1.146],
+      eye_right_inner:    [0.132, 0.205, 1.146],
+      eye_right_outer:    [0.455, 0.202, 1.099],
+      eye_left_center:    [-0.335, 0.209, 1.145],
+      eye_right_center:   [0.335, 0.209, 1.145],
+      eye_left_upper:     [-0.304, 0.244, 1.146],
+      eye_left_lower:     [-0.298, 0.077, 1.113],
+      eye_right_upper:    [0.304, 0.244, 1.146],
+      eye_right_lower:    [0.298, 0.077, 1.113],
+
+      brow_left_inner:    [-0.142, 0.277, 1.197],
+      brow_left_center:   [-0.296, 0.305, 1.189],
+      brow_left_outer:    [-0.484, 0.284, 1.113],
+      brow_right_inner:   [0.142, 0.277, 1.197],
+      brow_right_center:  [0.296, 0.305, 1.189],
+      brow_right_outer:   [0.484, 0.284, 1.113],
+      glabella:           [0.000, 0.286, 1.210],
+
+      forehead_center:    [0.000, 0.482, 1.221],
+      forehead_left:      [-0.373, 0.457, 1.164],
+      forehead_right:     [0.373, 0.457, 1.164],
+      temple_left:        [-0.705, 0.260, 0.710],
+      temple_right:       [0.705, 0.260, 0.710],
+      hairline_center:    [0.000, 0.832, 1.110],
+
+      mouth_left:         [-0.182, -0.604, 1.236],
+      mouth_right:        [0.182, -0.604, 1.236],
+      upper_lip_center:   [0.000, -0.542, 1.327],
+      upper_lip_left:     [-0.059, -0.536, 1.318],
+      upper_lip_right:    [0.059, -0.536, 1.318],
+      lower_lip_center:   [0.000, -0.696, 1.282],
+      lower_lip_left:     [-0.067, -0.693, 1.274],
+      lower_lip_right:    [0.067, -0.693, 1.274],
+      cupid_bow_left:     [-0.028, -0.540, 1.325],
+      cupid_bow_right:    [0.028, -0.540, 1.325],
+      philtrum_top:       [0.000, -0.514, 1.312],
+      philtrum_bottom:    [0.000, -0.542, 1.327],
+
+      ear_left_top:       [-0.862, 0.195, -0.025],
+      ear_left_center:    [-0.933, 0.011, -0.109],
+      ear_left_bottom:    [-0.861, -0.266, 0.005],
+      ear_right_top:      [0.862, 0.195, -0.025],
+      ear_right_center:   [0.933, 0.011, -0.109],
+      ear_right_bottom:   [0.861, -0.266, 0.005],
+      tragus_left:        [-0.815, 0.002, 0.089],
+      tragus_right:       [0.815, 0.002, 0.089],
+
+      crown:              [-0.000, 1.373, 0.171],
+      occiput:            [0.000, 0.338, -1.025],
+      skull_left:         [-0.795, 0.407, -0.215],
+      skull_right:        [0.795, 0.407, -0.215],
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SETUP
+  // ═══════════════════════════════════════════════════════════════════════
+
+  getDefault(param) {
+    return this.paramDefaults[param] ?? this.defaultValue;
+  }
+
+  static get MACRO_PARAMS() {
+    return ['age', 'sex', 'ancestryAfrican', 'ancestryAsian', 'ancestryCaucasian', 'bodyWeight', 'muscle'];
+  }
+
+  /**
+   * Load MakeHuman morph data (assets/models/base/head_morphs.json + .bin,
+   * built by scripts/assets/pack_morphs.py). Each entry is a sparse list of
+   * vertex deltas in head.glb vertex order.
+   */
+  setMorphData(meta, buffer) {
+    const total = this.totalVertices;
+    if (meta.vertexCount !== total) {
+      console.warn(`OBJMorpher: morph data is for ${meta.vertexCount} vertices, mesh has ${total}; ignoring`);
+      return;
+    }
+    const entries = {};
+    for (const [name, e] of Object.entries(meta.entries)) {
+      const idx = new Uint16Array(buffer, e.offset, e.count);
+      const deltaOffset = e.offset + Math.ceil(e.count * 2 / 4) * 4;
+      entries[name] = { idx, delta: new Int16Array(buffer, deltaOffset, e.count * 3), scale: e.scale };
+    }
+    this._morph = { entries, params: meta.params, macro: meta.macro };
+    console.log(`OBJMorpher: loaded ${Object.keys(entries).length} MakeHuman morph entries`);
+  }
+
+  _addEntry(offsets, name, weight) {
+    const e = this._morph.entries[name];
+    if (!e || Math.abs(weight) < 1e-4) return;
+    const k = e.scale * weight;
+    const { idx, delta } = e;
+    for (let j = 0; j < idx.length; j++) {
+      const o = idx[j] * 3;
+      offsets[o]     += delta[j * 3] * k;
+      offsets[o + 1] += delta[j * 3 + 1] * k;
+      offsets[o + 2] += delta[j * 3 + 2] * k;
+    }
+  }
+
+  /** Blend MakeHuman targets for every mapped slider; returns the params it handled. */
+  _applyTargetMorphs(offsets) {
+    const handled = new Set();
+    for (const [param, map] of Object.entries(this._morph.params)) {
+      handled.add(param);
+      const v = this.morphValues[param];
+      const def = this.getDefault(param);
+      if (v === undefined || v === def) continue;
+      // One-sided sliders (no "decr" targets) run from their default up to 100
+      const t = map.decr.length ? (v - 50) / 50 : (v - def) / (100 - def);
+      const list = t >= 0 ? map.incr : map.decr;
+      for (const [name, w] of list) this._addEntry(offsets, name, Math.abs(t) * w);
+    }
+
+    const macros = OBJMorpher.MACRO_PARAMS;
+    macros.forEach(p => handled.add(p));
+    if (macros.some(p => this.morphValues[p] !== this.getDefault(p))) {
+      const mv = this.morphValues;
+      // Ancestry weights (normalised); all zero means an even mix
+      let ra = [mv.ancestryAfrican, mv.ancestryAsian, mv.ancestryCaucasian].map(x => Math.max(0, x));
+      const rs = ra[0] + ra[1] + ra[2];
+      ra = rs > 0 ? ra.map(x => x / rs) : [1 / 3, 1 / 3, 1 / 3];
+      const g = Math.max(0, Math.min(1, mv.sex / 100));
+      // Age in years -> MakeHuman age value (0.1875 = 11 y, 0.5 = 25 y, 1.0 = 90 y)
+      const years = Math.max(11, Math.min(90, mv.age));
+      const mhAge = years <= 25 ? 0.1875 + (years - 11) / 14 * 0.3125 : 0.5 + (years - 25) / 65 * 0.5;
+      const ages = mhAge <= 0.5
+        ? { child: (0.5 - mhAge) / 0.3125, young: 1 - (0.5 - mhAge) / 0.3125, old: 0 }
+        : { child: 0, young: 1 - (mhAge - 0.5) / 0.5, old: (mhAge - 0.5) / 0.5 };
+      const races = this._morph.macro.races;
+      races.forEach((race, ri) => {
+        [['female', 1 - g], ['male', g]].forEach(([gender, gw]) => {
+          for (const [age, aw] of Object.entries(ages)) {
+            this._addEntry(offsets, `${race}_${gender}_${age}`, ra[ri] * gw * aw);
+          }
+        });
+      });
+      for (const [param, key] of [['bodyWeight', 'weight'], ['muscle', 'muscle']]) {
+        const t = (mv[param] - 50) / 50;
+        if (t) this._addEntry(offsets, `${key}_${t > 0 ? 'max' : 'min'}`, Math.abs(t));
+      }
+    }
+    return handled;
+  }
+
+  setMeshGroup(group) {
+    this.meshGroup = group;
+    this.meshes = [];
+    this.originalPositions = [];
+    this.vertexOffsets = [];
+    let offset = 0;
+
+    group.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        this.meshes.push(child);
+        const pos = child.geometry.attributes.position;
+        this.originalPositions.push(new Float32Array(pos.array));
+        this.vertexOffsets.push(offset);
+        offset += pos.count;
+      }
+    });
+
+    this.totalVertices = offset;
+    console.log(`OBJMorpher: bound ${this.meshes.length} mesh(es), ${offset} total vertices`);
+
+    this._buildVertexArray();
+    this._buildSeamGroups();
+    this._detectLandmarks();
+    this._createFaceMask();
+  }
+
+  // Vertices duplicated along UV seams share a position. Group them so their
+  // normals can be averaged after computeVertexNormals — otherwise every seam
+  // shows up as a hard edge once the mesh is morphed.
+  _buildSeamGroups() {
+    this._seamGroups = this.originalPositions.map((pos) => {
+      const byKey = new Map();
+      for (let i = 0; i < pos.length / 3; i++) {
+        const key = `${pos[i * 3].toFixed(5)},${pos[i * 3 + 1].toFixed(5)},${pos[i * 3 + 2].toFixed(5)}`;
+        const group = byKey.get(key);
+        if (group) group.push(i); else byKey.set(key, [i]);
+      }
+      return [...byKey.values()].filter(g => g.length > 1);
+    });
+  }
+
+  _smoothSeamNormals(meshIndex) {
+    const groups = this._seamGroups?.[meshIndex];
+    const normal = this.meshes[meshIndex].geometry.attributes.normal;
+    if (!groups?.length || !normal) return;
+    const n = normal.array;
+    for (const g of groups) {
+      let x = 0, y = 0, z = 0;
+      for (const i of g) { x += n[i * 3]; y += n[i * 3 + 1]; z += n[i * 3 + 2]; }
+      const len = Math.hypot(x, y, z) || 1;
+      for (const i of g) { n[i * 3] = x / len; n[i * 3 + 1] = y / len; n[i * 3 + 2] = z / len; }
+    }
+    normal.needsUpdate = true;
+  }
+
+  setRegionData(data) {
+    this.regionData = data;
+    this.perVertexRegion = data.per_vertex_region;
+    console.log(`OBJMorpher: region data loaded, ${data.vertex_count} vertices`);
+  }
+
+  _buildVertexArray() {
+    const N = this.totalVertices;
+    this._allVerts = new Float64Array(N * 3);
+    for (let m = 0; m < this.meshes.length; m++) {
+      const orig = this.originalPositions[m];
+      const off = this.vertexOffsets[m];
+      for (let i = 0; i < orig.length / 3; i++) {
+        const gi = off + i;
+        this._allVerts[gi * 3]     = orig[i * 3];
+        this._allVerts[gi * 3 + 1] = orig[i * 3 + 1];
+        this._allVerts[gi * 3 + 2] = orig[i * 3 + 2];
+      }
+    }
+  }
+
+  _detectLandmarks() {
+    const verts = this._allVerts;
+    const N = this.totalVertices;
+
+    for (const [name, pos] of Object.entries(OBJMorpher.LANDMARKS)) {
+      let bestDist = Infinity;
+      let bestIdx = 0;
+      const px = pos[0], py = pos[1], pz = pos[2];
+
+      for (let i = 0; i < N; i++) {
+        const dx = verts[i * 3] - px;
+        const dy = verts[i * 3 + 1] - py;
+        const dz = verts[i * 3 + 2] - pz;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          bestIdx = i;
+        }
+      }
+
+      this._landmarkIndices[name] = bestIdx;
+      this._landmarkPositions[name] = [
+        verts[bestIdx * 3],
+        verts[bestIdx * 3 + 1],
+        verts[bestIdx * 3 + 2],
+      ];
+      this._landmarkSnapDistance[name] = Math.sqrt(bestDist);
+    }
+
+    // Nearest-vertex snapping cannot tell a good target from a bad one — it
+    // returns the closest vertex to whatever coordinate it was given, however
+    // wrong. A landmark authored off the mesh therefore lands on the wrong
+    // feature in silence, which is how `chin` ended up a quarter of a unit up
+    // the jaw and `ear_*_bottom` above the lobe. Anything that snapped further
+    // than a couple of vertex spacings is suspect, both for placing
+    // accessories and for centring the morph falloff weights.
+    const suspect = Object.entries(this._landmarkSnapDistance)
+      .filter(([, d]) => d > OBJMorpher.LANDMARK_SNAP_TOLERANCE)
+      .sort((a, b) => b[1] - a[1]);
+
+    console.log(`OBJMorpher: detected ${Object.keys(this._landmarkPositions).length} landmarks`);
+    if (suspect.length) {
+      console.warn(
+        `OBJMorpher: ${suspect.length} landmark(s) snapped further than ` +
+        `${OBJMorpher.LANDMARK_SNAP_TOLERANCE} from their authored position — ` +
+        `these are probably on the wrong feature:`
+      );
+      for (const [name, d] of suspect) {
+        const a = OBJMorpher.LANDMARKS[name];
+        const p = this._landmarkPositions[name];
+        console.warn(
+          `  ${name.padEnd(20)} off by ${d.toFixed(3)}   ` +
+          `authored [${a.map(v => v.toFixed(2)).join(', ')}]  ` +
+          `landed [${p.map(v => v.toFixed(2)).join(', ')}]`
+        );
+      }
+    }
+  }
+
+  /**
+   * How far a landmark may snap before it is reported as misplaced.
+   *
+   * On the stock head every landmark lands within 0.082, and those largest
+   * few (eye and brow points authored a little in front of the lid surface)
+   * still snap onto the right feature — so this is deliberately set above
+   * them. It is a guard for a swapped or rescaled head mesh, where landmarks
+   * would start missing their features by a wide margin, not a nit-picker for
+   * the normal case.
+   */
+  static get LANDMARK_SNAP_TOLERANCE() { return 0.12; }
+
+  _createFaceMask() {
+    const N = this.totalVertices;
+    const cfg = OBJMorpher.MODEL_CONFIG;
+    const yMin = cfg.face_y_min;
+    const yMax = cfg.face_y_max;
+    const falloff = cfg.boundary_falloff;
+    this._faceMask = new Float64Array(N);
+
+    for (let i = 0; i < N; i++) {
+      const y = this._allVerts[i * 3 + 1];
+      let mask = 1.0;
+      if (y < yMin + falloff) {
+        mask = Math.max(0, Math.min(1, (y - yMin) / falloff));
+      }
+      if (y > yMax - falloff) {
+        mask = Math.min(mask, Math.max(0, Math.min(1, (yMax - y) / falloff)));
+      }
+      this._faceMask[i] = mask;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // WEIGHT FUNCTIONS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  _getRegionWeights(landmarkNames, radius) {
+    const cfg = OBJMorpher.MODEL_CONFIG;
+    radius *= cfg.radius_scale;
+    const N = this.totalVertices;
+    const weights = new Float64Array(N);
+    const verts = this._allVerts;
+    const twoR2 = 2 * radius * radius;
+
+    for (const name of landmarkNames) {
+      const lp = this._landmarkPositions[name];
+      if (!lp) continue;
+      const lx = lp[0], ly = lp[1], lz = lp[2];
+
+      for (let i = 0; i < N; i++) {
+        const dx = verts[i * 3] - lx;
+        const dy = verts[i * 3 + 1] - ly;
+        const dz = verts[i * 3 + 2] - lz;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const w = Math.exp(-d2 / twoR2);
+        if (w > weights[i]) weights[i] = w;
+      }
+    }
+
+    for (let i = 0; i < N; i++) {
+      weights[i] *= this._faceMask[i];
+    }
+    return weights;
+  }
+
+  _getDirectionalWeights(landmarkNames, radius) {
+    const weights = this._getRegionWeights(landmarkNames, radius);
+    const N = this.totalVertices;
+    const directions = new Float64Array(N);
+    const tw = OBJMorpher.MODEL_CONFIG.transition_width;
+    const verts = this._allVerts;
+
+    for (let i = 0; i < N; i++) {
+      directions[i] = Math.tanh(verts[i * 3] / tw);
+    }
+    return { weights, directions };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MORPH APPLICATION
+  // ═══════════════════════════════════════════════════════════════════════
+
+  setMorphValue(param, value) {
+    if (this.params.includes(param)) {
+      this.morphValues[param] = value;
+      this.applyAllMorphs();
+    }
+  }
+
+  getModifiedCount() {
+    return this.params.filter(p => this.morphValues[p] !== this.getDefault(p)).length;
+  }
+
+  resetAll() {
+    this.params.forEach(p => this.morphValues[p] = this.getDefault(p));
+    this.applyAllMorphs();
+  }
+
+  resetGroup(groupName) {
+    const groupMap = {
+      skull:    ['faceWidth', 'faceLength', 'headWidth', 'headLength', 'faceTaper'],
+      forehead: ['foreheadHeight', 'foreheadSlope', 'foreheadWidth', 'templeWidth', 'foreheadBulge'],
+      brows:    ['browHeight', 'browSpacing', 'browProminence', 'browArch', 'browThickness'],
+      eyes:     ['eyeSpacing', 'eyeHeight', 'eyeDepth', 'eyeSize', 'eyeTilt', 'eyeOpenness'],
+      nose:     ['noseLength', 'noseWidth', 'noseBridgeWidth', 'noseBridgeHeight',
+                 'noseTipHeight', 'noseTipWidth', 'nostrilFlare'],
+      cheeks:   ['cheekFullness', 'cheekboneProminence', 'cheekHeight', 'nasolabialDepth'],
+      mouth:    ['mouthWidth', 'mouthHeight', 'lipProtrusion',
+                 'upperLipThickness', 'lowerLipThickness',
+                 'cupidBow', 'philtrumDepth', 'philtrumWidth', 'lipCornerAngle'],
+      jaw:      ['jawWidth', 'chinHeight', 'chinWidth', 'chinProtrusion', 'jawDefinition'],
+      ears:     ['earSize', 'earProtrusion', 'earHeight', 'earlobeSize'],
+      person:   ['age', 'sex', 'ancestryAfrican', 'ancestryAsian', 'ancestryCaucasian', 'bodyWeight', 'muscle'],
+      details:  ['eyeBags', 'epicanthicFold', 'noseCurve', 'chinCleft', 'doubleChin'],
+    };
+    const params = groupMap[groupName] || [];
+    params.forEach(p => this.morphValues[p] = this.getDefault(p));
+    this.applyAllMorphs();
+  }
+
+  applyAllMorphs() {
+    if (!this.meshes.length || !this._allVerts) return;
+
+    // Reset to originals
+    for (let m = 0; m < this.meshes.length; m++) {
+      this.meshes[m].geometry.attributes.position.array.set(this.originalPositions[m]);
+    }
+
+    const cfg = OBJMorpher.MODEL_CONFIG;
+    const scale = cfg.scale_factor;
+    const zDir = cfg.z_front_direction;
+
+    const active = {};
+    for (const [p, v] of Object.entries(this.morphValues)) {
+      if (v !== this.getDefault(p)) {
+        active[p] = (v - this.defaultValue) / 50;
+      }
+    }
+
+    if (Object.keys(active).length === 0) {
+      this._finalizeGeometry();
+      return;
+    }
+
+    const N = this.totalVertices;
+    const offsets = new Float64Array(N * 3);
+
+    // MakeHuman targets handle every slider they map; the legacy landmark
+    // pushes below only run for the few without a target.
+    if (this._morph) {
+      for (const p of this._applyTargetMorphs(offsets)) delete active[p];
+    }
+
+    // ─── JAW & CHIN ────────────────────────────────────────────────────
+
+    if (active.jawWidth !== undefined) {
+      const t = active.jawWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['jaw_left', 'jaw_right', 'jaw_angle_left', 'jaw_angle_right'], 0.12);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.chinHeight !== undefined) {
+      const t = active.chinHeight;
+      const weights = this._getRegionWeights(['chin', 'chin_left', 'chin_right'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] -= weights[i] * disp;
+    }
+
+    if (active.chinWidth !== undefined) {
+      const t = active.chinWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['chin', 'chin_left', 'chin_right'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.chinProtrusion !== undefined) {
+      const t = active.chinProtrusion;
+      const weights = this._getRegionWeights(['chin', 'chin_left', 'chin_right'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.jawDefinition !== undefined) {
+      const t = active.jawDefinition;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['jaw_angle_left', 'jaw_angle_right'], 0.10);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3]   += directions[i] * weights[i] * disp * 0.7;
+        offsets[i*3+1] -= weights[i] * disp * 0.3;
+      }
+    }
+
+    // ─── NOSE ──────────────────────────────────────────────────────────
+
+    if (active.noseLength !== undefined) {
+      const t = active.noseLength;
+      const weights = this._getRegionWeights(['nose_tip', 'nose_base'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.noseWidth !== undefined) {
+      const t = active.noseWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['nostril_left', 'nostril_right', 'alar_left', 'alar_right'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp * 0.3;
+    }
+
+    if (active.noseBridgeWidth !== undefined) {
+      const t = active.noseBridgeWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['nose_bridge', 'nose_bridge_top'], 0.05);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp * 0.3;
+    }
+
+    if (active.noseBridgeHeight !== undefined) {
+      const t = active.noseBridgeHeight;
+      const weights = this._getRegionWeights(['nose_bridge', 'nose_bridge_top'], 0.05);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.noseTipHeight !== undefined) {
+      const t = active.noseTipHeight;
+      const weights = this._getRegionWeights(['nose_tip'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.noseTipWidth !== undefined) {
+      const t = active.noseTipWidth;
+      const { weights, directions } = this._getDirectionalWeights(['nose_tip'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp * 0.3;
+    }
+
+    if (active.nostrilFlare !== undefined) {
+      const t = active.nostrilFlare;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['nostril_left', 'nostril_right', 'alar_left', 'alar_right'], 0.03);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp * 0.3;
+    }
+
+    // ─── EYES ──────────────────────────────────────────────────────────
+
+    if (active.eyeSpacing !== undefined) {
+      const t = active.eyeSpacing;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['eye_left_center', 'eye_right_center',
+         'eye_left_inner', 'eye_right_inner',
+         'eye_left_outer', 'eye_right_outer'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.eyeHeight !== undefined) {
+      const t = active.eyeHeight;
+      const weights = this._getRegionWeights(['eye_left_center', 'eye_right_center'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.eyeDepth !== undefined) {
+      const t = active.eyeDepth;
+      const weights = this._getRegionWeights(['eye_left_center', 'eye_right_center'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] -= zDir * weights[i] * disp;
+    }
+
+    if (active.eyeSize !== undefined) {
+      const t = active.eyeSize;
+      const disp = t * 0.15;
+      for (const side of ['left', 'right']) {
+        const cp = this._landmarkPositions[`eye_${side}_center`];
+        if (!cp) continue;
+        const landmarks = [
+          `eye_${side}_center`, `eye_${side}_inner`,
+          `eye_${side}_outer`, `eye_${side}_upper`, `eye_${side}_lower`];
+        const weights = this._getRegionWeights(landmarks, 0.05);
+        for (let i = 0; i < N; i++) {
+          if (weights[i] < 0.001) continue;
+          offsets[i*3]   += (this._allVerts[i*3]   - cp[0]) * weights[i] * disp;
+          offsets[i*3+1] += (this._allVerts[i*3+1] - cp[1]) * weights[i] * disp;
+          offsets[i*3+2] += (this._allVerts[i*3+2] - cp[2]) * weights[i] * disp;
+        }
+      }
+    }
+
+    if (active.eyeTilt !== undefined) {
+      const t = active.eyeTilt;
+      const disp = t * scale * 0.5;
+      const wO = this._getRegionWeights(['eye_left_outer', 'eye_right_outer'], 0.04);
+      const wI = this._getRegionWeights(['eye_left_inner', 'eye_right_inner'], 0.04);
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+1] += wO[i] * disp;
+        offsets[i*3+1] -= wI[i] * disp * 0.5;
+      }
+    }
+
+    if (active.eyeOpenness !== undefined) {
+      const t = active.eyeOpenness;
+      const disp = t * scale * 0.3;
+      const wU = this._getRegionWeights(['eye_left_upper', 'eye_right_upper'], 0.03);
+      const wL = this._getRegionWeights(['eye_left_lower', 'eye_right_lower'], 0.03);
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+1] += wU[i] * disp;
+        offsets[i*3+1] -= wL[i] * disp;
+      }
+    }
+
+    // ─── BROWS ─────────────────────────────────────────────────────────
+
+    if (active.browHeight !== undefined) {
+      const t = active.browHeight;
+      const weights = this._getRegionWeights(
+        ['brow_left_center', 'brow_right_center',
+         'brow_left_inner', 'brow_right_inner',
+         'brow_left_outer', 'brow_right_outer'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.browSpacing !== undefined) {
+      const t = active.browSpacing;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['brow_left_center', 'brow_right_center',
+         'brow_left_inner', 'brow_right_inner'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.browProminence !== undefined) {
+      const t = active.browProminence;
+      const weights = this._getRegionWeights(
+        ['brow_left_center', 'brow_right_center', 'glabella'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.browArch !== undefined) {
+      const t = active.browArch;
+      const weights = this._getRegionWeights(
+        ['brow_left_center', 'brow_right_center'], 0.04);
+      const disp = t * scale * 0.5;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.browThickness !== undefined) {
+      const t = active.browThickness;
+      const weights = this._getRegionWeights(
+        ['brow_left_center', 'brow_right_center'], 0.06);
+      const disp = t * scale * 0.5;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+2] += zDir * weights[i] * disp;
+        offsets[i*3+1] += weights[i] * disp * 0.3;
+      }
+    }
+
+    // ─── FOREHEAD ──────────────────────────────────────────────────────
+
+    if (active.foreheadHeight !== undefined) {
+      const t = active.foreheadHeight;
+      const weights = this._getRegionWeights(
+        ['forehead_center', 'forehead_left', 'forehead_right', 'hairline_center'], 0.12);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.foreheadSlope !== undefined) {
+      const t = active.foreheadSlope;
+      const weights = this._getRegionWeights(
+        ['forehead_center', 'forehead_left', 'forehead_right'], 0.10);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.foreheadWidth !== undefined) {
+      const t = active.foreheadWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['forehead_left', 'forehead_right'], 0.10);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.templeWidth !== undefined) {
+      const t = active.templeWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['temple_left', 'temple_right'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.foreheadBulge !== undefined) {
+      const t = active.foreheadBulge;
+      const weights = this._getRegionWeights(['forehead_center'], 0.10);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    // ─── CHEEKS ────────────────────────────────────────────────────────
+
+    if (active.cheekFullness !== undefined) {
+      const t = active.cheekFullness;
+      const weights = this._getRegionWeights(
+        ['cheek_left', 'cheek_right', 'lower_cheek_left', 'lower_cheek_right'], 0.10);
+      const disp = t * scale;
+      const tw = OBJMorpher.MODEL_CONFIG.transition_width;
+      for (let i = 0; i < N; i++) {
+        const dir = Math.tanh(this._allVerts[i*3] / tw);
+        offsets[i*3]   += dir * weights[i] * disp * 0.7;
+        offsets[i*3+2] += zDir * weights[i] * disp * 0.5;
+      }
+    }
+
+    if (active.cheekboneProminence !== undefined) {
+      const t = active.cheekboneProminence;
+      const weights = this._getRegionWeights(['cheekbone_left', 'cheekbone_right'], 0.08);
+      const disp = t * scale;
+      const tw = OBJMorpher.MODEL_CONFIG.transition_width;
+      for (let i = 0; i < N; i++) {
+        const dir = Math.tanh(this._allVerts[i*3] / tw);
+        offsets[i*3]   += dir * weights[i] * disp * 0.6;
+        offsets[i*3+2] += zDir * weights[i] * disp * 0.4;
+      }
+    }
+
+    if (active.cheekHeight !== undefined) {
+      const t = active.cheekHeight;
+      const weights = this._getRegionWeights(
+        ['cheek_left', 'cheek_right', 'cheekbone_left', 'cheekbone_right'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.nasolabialDepth !== undefined) {
+      const t = active.nasolabialDepth;
+      const weights = this._getRegionWeights(['lower_cheek_left', 'lower_cheek_right'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] -= zDir * weights[i] * disp;
+    }
+
+    // ─── MOUTH & LIPS ─────────────────────────────────────────────────
+
+    if (active.mouthWidth !== undefined) {
+      const t = active.mouthWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['mouth_left', 'mouth_right'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.mouthHeight !== undefined) {
+      const t = active.mouthHeight;
+      const weights = this._getRegionWeights(
+        ['mouth_left', 'mouth_right', 'upper_lip_center', 'lower_lip_center'], 0.08);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.lipProtrusion !== undefined) {
+      const t = active.lipProtrusion;
+      const weights = this._getRegionWeights(
+        ['upper_lip_center', 'lower_lip_center',
+         'upper_lip_left', 'upper_lip_right',
+         'lower_lip_left', 'lower_lip_right'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] += zDir * weights[i] * disp;
+    }
+
+    if (active.upperLipThickness !== undefined) {
+      const t = active.upperLipThickness;
+      const weights = this._getRegionWeights(
+        ['upper_lip_center', 'upper_lip_left', 'upper_lip_right'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+2] += zDir * weights[i] * disp * 0.5;
+        offsets[i*3+1] += weights[i] * disp * 0.3;
+      }
+    }
+
+    if (active.lowerLipThickness !== undefined) {
+      const t = active.lowerLipThickness;
+      const weights = this._getRegionWeights(
+        ['lower_lip_center', 'lower_lip_left', 'lower_lip_right'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+2] += zDir * weights[i] * disp * 0.5;
+        offsets[i*3+1] -= weights[i] * disp * 0.3;
+      }
+    }
+
+    if (active.cupidBow !== undefined) {
+      const t = active.cupidBow;
+      const weights = this._getRegionWeights(['cupid_bow_left', 'cupid_bow_right'], 0.03);
+      const disp = t * scale * 0.5;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+1] += weights[i] * disp;
+        offsets[i*3+2] += zDir * weights[i] * disp * 0.3;
+      }
+    }
+
+    if (active.philtrumDepth !== undefined) {
+      const t = active.philtrumDepth;
+      const weights = this._getRegionWeights(['philtrum_top', 'philtrum_bottom'], 0.03);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] -= zDir * weights[i] * disp;
+    }
+
+    if (active.philtrumWidth !== undefined) {
+      const t = active.philtrumWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['philtrum_top', 'philtrum_bottom'], 0.03);
+      const disp = t * scale * 0.5;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.lipCornerAngle !== undefined) {
+      const t = active.lipCornerAngle;
+      const weights = this._getRegionWeights(['mouth_left', 'mouth_right'], 0.04);
+      const disp = t * scale * 0.5;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    // ─── EARS ──────────────────────────────────────────────────────────
+
+    if (active.earSize !== undefined) {
+      const t = active.earSize;
+      const disp = t * 0.15;
+      for (const side of ['left', 'right']) {
+        const cp = this._landmarkPositions[`ear_${side}_center`];
+        if (!cp) continue;
+        const landmarks = [
+          `ear_${side}_top`, `ear_${side}_center`,
+          `ear_${side}_bottom`, `tragus_${side}`];
+        const weights = this._getRegionWeights(landmarks, 0.06);
+        for (let i = 0; i < N; i++) {
+          if (weights[i] < 0.001) continue;
+          offsets[i*3]   += (this._allVerts[i*3]   - cp[0]) * weights[i] * disp;
+          offsets[i*3+1] += (this._allVerts[i*3+1] - cp[1]) * weights[i] * disp;
+          offsets[i*3+2] += (this._allVerts[i*3+2] - cp[2]) * weights[i] * disp;
+        }
+      }
+    }
+
+    if (active.earProtrusion !== undefined) {
+      const t = active.earProtrusion;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['ear_left_center', 'ear_right_center', 'ear_left_top', 'ear_right_top'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.earHeight !== undefined) {
+      const t = active.earHeight;
+      const weights = this._getRegionWeights(
+        ['ear_left_center', 'ear_right_center',
+         'ear_left_top', 'ear_right_top',
+         'ear_left_bottom', 'ear_right_bottom'], 0.06);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] += weights[i] * disp;
+    }
+
+    if (active.earlobeSize !== undefined) {
+      const t = active.earlobeSize;
+      const weights = this._getRegionWeights(['ear_left_bottom', 'ear_right_bottom'], 0.04);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+1] -= weights[i] * disp;
+    }
+
+    // ─── OVERALL HEAD / FACE ───────────────────────────────────────────
+
+    if (active.faceWidth !== undefined) {
+      const t = active.faceWidth;
+      const disp = t * 0.1;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3] += this._allVerts[i*3] * this._faceMask[i] * disp;
+      }
+    }
+
+    if (active.faceLength !== undefined) {
+      const t = active.faceLength;
+      const disp = t * 0.1;
+      let sumY = 0;
+      for (let i = 0; i < N; i++) sumY += this._allVerts[i*3+1];
+      const meanY = sumY / N;
+      for (let i = 0; i < N; i++) {
+        offsets[i*3+1] += (this._allVerts[i*3+1] - meanY) * this._faceMask[i] * disp;
+      }
+    }
+
+    if (active.headWidth !== undefined) {
+      const t = active.headWidth;
+      const { weights, directions } = this._getDirectionalWeights(
+        ['skull_left', 'skull_right', 'temple_left', 'temple_right'], 0.15);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3] += directions[i] * weights[i] * disp;
+    }
+
+    if (active.headLength !== undefined) {
+      const t = active.headLength;
+      const weights = this._getRegionWeights(['occiput', 'crown'], 0.15);
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) offsets[i*3+2] -= zDir * weights[i] * disp;
+    }
+
+    if (active.faceTaper !== undefined) {
+      const t = active.faceTaper;
+      const yRange = cfg.face_y_max - cfg.face_y_min;
+      const tw = cfg.transition_width;
+      const disp = t * scale;
+      for (let i = 0; i < N; i++) {
+        const yNorm = 1 - (this._allVerts[i*3+1] - cfg.face_y_min) / yRange;
+        const yf = Math.max(0, Math.min(1, yNorm));
+        const yf2 = yf * yf;
+        const dir = Math.tanh(this._allVerts[i*3] / tw);
+        offsets[i*3] -= dir * yf2 * this._faceMask[i] * disp;
+      }
+    }
+
+    // ─── APPLY OFFSETS ─────────────────────────────────────────────────
+
+    for (let m = 0; m < this.meshes.length; m++) {
+      const positions = this.meshes[m].geometry.attributes.position;
+      const baseOffset = this.vertexOffsets[m];
+
+      for (let i = 0; i < positions.count; i++) {
+        const gi = baseOffset + i;
+        positions.setXYZ(
+          i,
+          positions.getX(i) + offsets[gi*3],
+          positions.getY(i) + offsets[gi*3+1],
+          positions.getZ(i) + offsets[gi*3+2],
+        );
+      }
+    }
+
+    this._finalizeGeometry();
+  }
+
+  _finalizeGeometry() {
+    for (let m = 0; m < this.meshes.length; m++) {
+      this.meshes[m].geometry.attributes.position.needsUpdate = true;
+      this.meshes[m].geometry.computeVertexNormals();
+      this._smoothSeamNormals(m);
+      this.meshes[m].geometry.computeBoundingBox();
+      this.meshes[m].geometry.computeBoundingSphere();
+    }
+
+    // Refresh skin marks after morphing is complete
+    if (this.skinMarkSystem && typeof this.skinMarkSystem.refreshMarksAfterMorph === 'function') {
+      this.skinMarkSystem.refreshMarksAfterMorph();
+    }
+
+    if (typeof this.onMorphApplied === 'function') this.onMorphApplied();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STATE
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get the current (post-morph) position of a named landmark vertex.
+   * Returns [x, y, z] or null if not found.
+   */
+  getCurrentLandmarkPosition(name) {
+    const idx = this._landmarkIndices[name];
+    if (idx === undefined) return null;
+    // Find which mesh contains this global vertex index
+    for (let m = 0; m < this.meshes.length; m++) {
+      const baseOffset = this.vertexOffsets[m];
+      const count = this.meshes[m].geometry.attributes.position.count;
+      if (idx >= baseOffset && idx < baseOffset + count) {
+        const localIdx = idx - baseOffset;
+        const pos = this.meshes[m].geometry.attributes.position;
+        return [pos.getX(localIdx), pos.getY(localIdx), pos.getZ(localIdx)];
+      }
+    }
+    return null;
+  }
+
+  exportState() { return { ...this.morphValues }; }
+
+  loadState(state) {
+    if (!state) return;
+    for (const [key, value] of Object.entries(state)) {
+      if (this.params.includes(key)) {
+        this.morphValues[key] = typeof value === 'number' && value <= 1
+          ? Math.round(value * 100) : value;
+      }
+    }
+    this.applyAllMorphs();
+  }
+}
+
+window.OBJMorpher = OBJMorpher;
