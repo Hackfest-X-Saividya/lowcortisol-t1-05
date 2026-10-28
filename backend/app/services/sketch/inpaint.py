@@ -25,9 +25,15 @@ async def inpaint_region(
     mask: np.ndarray,
     prompt: str,
     seed: int | None,
+    pad_frac: float = 0.15,
+    negative_prompt: str = NEGATIVE,
 ) -> tuple[np.ndarray, str, str]:
-    """Return (new image, provider, model)."""
-    x0, y0, x1, y1 = mask_bbox(mask, pad_frac=0.15)
+    """Return (new image, provider, model).
+
+    ``pad_frac`` widens the crop around the mask so the model sees surrounding face context
+    (a tight strip like the eyes otherwise gets filled with blank skin).
+    """
+    x0, y0, x1, y1 = mask_bbox(mask, pad_frac=pad_frac)
     crop = img[y0:y1, x0:x1]
     mcrop = mask[y0:y1, x0:x1]
     ch, cw = crop.shape[:2]
@@ -43,7 +49,7 @@ async def inpaint_region(
             image_png=encode_png(crop_s),
             mask_png=mbuf.tobytes(),
             prompt=prompt,
-            negative_prompt=NEGATIVE,
+            negative_prompt=negative_prompt,
             seed=seed,
         )
     )

@@ -62,6 +62,23 @@ class CloudflareBase:
             await self._client.aclose()
 
 
+def _is_flux2(model: str) -> bool:
+    """FLUX.2 [dev] / [klein] take multipart form data (even for a prompt-only call)."""
+    return "flux-2" in model
+
+
+def _form(fields: dict[str, object], image_png: bytes | None = None) -> dict[str, tuple]:  # type: ignore[type-arg]
+    """Multipart fields for FLUX.2. ``input_image_0`` is an optional reference image."""
+    files: dict[str, tuple] = {k: (None, str(v)) for k, v in fields.items()}  # type: ignore[type-arg]
+    if image_png is not None:
+        files["input_image_0"] = ("reference.png", image_png, "image/png")
+    return files
+
+
+def _clamp_side(px: int) -> int:
+    return max(256, min(1920, int(px)))
+
+
 def image_body(model: str, req: ImageRequest) -> dict[str, object]:
     """Request body for a Workers AI text-to-image model (input names differ per model)."""
     body: dict[str, object] = {"prompt": req.prompt}
@@ -102,13 +119,25 @@ class CloudflareImageGen(CloudflareBase):
         last: ProviderError | None = None
         for model in self.models:
             try:
+                if _is_flux2(model):
+                    kwargs: dict[str, object] = {
+                        "files": _form(
+                            {
+                                "prompt": req.prompt,
+                                "width": _clamp_side(req.width),
+                                "height": _clamp_side(req.height),
+                            }
+                        )
+                    }
+                else:
+                    kwargs = {"json": image_body(model, req)}
                 resp = await request_with_retries(
                     self._client,
                     "POST",
                     self.base_url + model,
                     provider=self.name,
                     max_retries=self.max_retries,
-                    json=image_body(model, req),
+                    **kwargs,
                 )
                 png = _decode_image_response(resp, self.name)
                 return ImageResult(png=png, provider=self.name, model=model, seed=req.seed)
@@ -128,6 +157,33 @@ class CloudflareInpainter(CloudflareBase):
         self.model = settings.cf_inpaint_model
 
     async def inpaint(self, req: InpaintRequest) -> ImageResult:
+        if _is_flux2(self.model):
+            # Reference-image edit: FLUX.2 keeps the person's identity from ``input_image_0``.
+            # It has no mask input; the caller composites the result back through its mask,
+            # so only the masked region of the new image is ever used.
+            instruction = (
+                "Edit the reference photo of a person. Target appearance: "
+                f"{req.prompt}. Keep the same person, face identity, pose, camera framing, "
+                "lighting and background exactly as in the reference. Change only what is "
+                "described; everything else must stay identical."
+            )
+            resp = await request_with_retries(
+                self._client,
+                "POST",
+                self.base_url + self.model,
+                provider=self.name,
+                max_retries=self.max_retries,
+                files=_form(
+                    {
+                        "prompt": instruction,
+                        "width": _clamp_side(req.width),
+                        "height": _clamp_side(req.height),
+                    },
+                    req.image_png,
+                ),
+            )
+            png = _decode_image_response(resp, self.name)
+            return ImageResult(png=png, provider=self.name, model=self.model, seed=req.seed)
         body: dict[str, object] = {
             "prompt": req.prompt,
             "image_b64": base64.b64encode(req.image_png).decode(),

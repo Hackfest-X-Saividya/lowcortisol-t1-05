@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     login_max_failures: int = 5
     login_lock_minutes: int = 15
 
+    #Cartoon
+    allow_mock_image_fallback: bool = False
+
     # ---- AI providers ---------------------------------------------------------------
     ai_mode: AIMode = "cloud"  # cloud | mock
     cloud_mode_ack: bool = True
@@ -87,9 +90,9 @@ class Settings(BaseSettings):
     # Realistic portraits (verified 2026-10-28): Lucid Origin, then Phoenix, then SDXL via chain
     # flux-1-schnell: realistic and about 50x cheaper in neurons than Lucid Origin (about 60
     # neurons per portrait, so the 10,000/day free allowance lasts ~150 renders)
-    cf_image_model: str = "@cf/black-forest-labs/flux-1-schnell"
-    cf_image_fallback_model: str = "@cf/stabilityai/stable-diffusion-xl-base-1.0"
-    cf_inpaint_model: str = "@cf/runwayml/stable-diffusion-v1-5-inpainting"
+    cf_image_model: str = "@cf/black-forest-labs/flux-2-klein-9b"
+    cf_image_fallback_model: str = "@cf/black-forest-labs/flux-1-schnell"
+    cf_inpaint_model: str = "@cf/black-forest-labs/flux-2-klein-9b"
     cloudflare_base_url: str = "https://api.cloudflare.com/client/v4"
     pollinations_base_url: str = "https://image.pollinations.ai/prompt"
     pollinations_model: str = "flux"
@@ -211,7 +214,7 @@ class Settings(BaseSettings):
             else ["pollinations", "cloudflare"]
         )
         chain = [p for p in order if p != "cloudflare" or self.cloudflare_configured]
-        return chain + ["mock"]
+        return chain + (["mock"] if self.allow_mock_image_fallback else [])
 
     @property
     def inpaint_chain(self) -> list[str]:

@@ -279,6 +279,7 @@ def scene_command(utterance_original: str, utterance_en: str, scene: dict[str, A
 # ---- live interview turn (one call per witness turn) -------------------------------------
 
 SKETCH_PARAMS = (
+    "face_width",
     "jaw_width",
     "face_length",
     "eye_size",
@@ -299,6 +300,7 @@ class TurnOut(BaseModel):
     english: str = ""
     fields: dict[str, FeatureValue] = Field(default_factory=dict)
     adjustments: list[Adjustment] = Field(default_factory=list)
+    visual_edits: list[str] = Field(default_factory=list)
     reply_local: str = ""
     reply_en: str = ""
     ask_field: str = ""
@@ -327,7 +329,12 @@ def interview_turn(
         " 'nose longer', 'eyes closer'), list {param, amount} with param one of "
         + ", ".join(SKETCH_PARAMS)
         + "; amount signed: a little=0.05, more=0.10, a lot=0.15 (negative = smaller/narrower/"
-        "shorter/lower/closer).\n"
+        "shorter/lower/closer). face_width = fuller/chubbier/rounder face (+) or thinner/slimmer (-).\n"
+        "   visual_edits: for EVERY appearance detail of the face, head or neck that the witness states in THIS"
+        " turn (hair, beard, scars, glasses, tattoos, skin marks, expression, shape, anything visible),"
+        " one short English phrase describing how the person looks, e.g. 'long hair reaching the shoulders',"
+        " 'a scar across the left cheek'. Empty list if the words say nothing about appearance; never"
+        " include places, times, clothing worn below the neck, or anything the witness did not say.\n"
         f"4. reply_local: in {lang_name}, a very short neutral acknowledgement (at most five words,"
         " never repeating feature details back) and then exactly ONE open, non-leading question about"
         " the FIRST entry in next_fields that your step 2 did not fill. Ask it like a sketch artist:"
@@ -335,7 +342,7 @@ def interview_turn(
         " question that names a feature, never give options or multiple choice. If next_fields is"
         " empty, ask whether anything in the sketch looks different from the person.\n"
         "5. reply_en: the same reply in English. ask_field: the field key you asked about, or 'review'.\n"
-        "Return one JSON object with keys english, fields, adjustments, reply_local, reply_en, ask_field."
+        "Return one JSON object with keys english, fields, adjustments, visual_edits, reply_local, reply_en, ask_field."
     )
     known = {
         k: v.get("value") for k, v in sheet.items() if isinstance(v, dict) and not k.startswith("_")

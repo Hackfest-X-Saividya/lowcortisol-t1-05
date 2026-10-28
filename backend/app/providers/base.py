@@ -85,6 +85,8 @@ class InpaintRequest:
     negative_prompt: str = ""
     seed: int | None = None
     strength: float = 0.9
+    width: int = 512
+    height: int = 512
 
 
 class LLMProvider(Protocol):

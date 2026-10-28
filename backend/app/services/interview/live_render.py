@@ -42,11 +42,11 @@ from app.core.security import Principal
 from app.db.models.sketch import SketchVersion
 from app.db.repositories import sketch as sketch_repo
 from app.db.repositories import statements as repo
-from app.providers.base import ImageRequest
+from app.providers.base import ImageRequest, InpaintRequest
 from app.services import cases as case_service
 from app.services.interview import engine, live_warp, prompts
 from app.services.interview.fields import FIELD_MAP
-from app.services.interview.live import ADJUST_KEY, apply_adjustments
+from app.services.interview.live import ADJUST_KEY, EDITS_KEY, apply_adjustments
 from app.services.sketch.generation import build_prompt
 from app.services.sketch.landmarks import landmarks_to_json, load_template
 from app.services.sketch.overlays import apply_overlays
@@ -115,6 +115,38 @@ def _val(sheet: dict[str, Any], key: str) -> str:
     return "" if s in ("", "not_remembered") else s
 
 
+REGION_FOCUS = {
+    "eyes": "both eyes open and clearly visible, natural eyelids and eyelashes, looking straight at the camera",
+    "brows": "natural eyebrows above open eyes",
+    "nose": "natural nose",
+    "mouth": "natural closed mouth",
+    "jaw": "natural jaw and chin",
+    "ears": "natural ears",
+    "face_shape": "natural face",
+    "hair": "natural hair",
+    "skin": "natural skin",
+    "marks": "natural skin",
+}
+REGION_NEGATIVE = (
+    NEGATIVE + ", closed eyes, blank eyes, no eyes, missing eyes, empty face, smooth plastic skin"
+)
+
+
+def region_prompt(sheet: dict[str, Any], region: str) -> str:
+    """Short prompt describing only the region being repainted (not the whole passport photo)."""
+    parts = []
+    for fk, reg in FIELD_TO_REGION.items():
+        v = _val(sheet, fk)[:60]
+        if reg == region and v and v.lower() not in ("no", "none", "nothing"):
+            parts.append(v)
+    focus = REGION_FOCUS.get(region, "natural face")
+    detail = (", " + ", ".join(parts)) if parts else ""
+    return (
+        f"close-up photo of a man's face, {focus}{detail}, realistic, natural skin texture, "
+        "same person, same lighting, sharp focus"
+    )
+
+
 def has_face_details(sheet: dict[str, Any]) -> bool:
     return any(_val(sheet, k) for k in FACE_FIELDS)
 
@@ -130,11 +162,34 @@ def realistic_prompt(sheet: dict[str, Any]) -> str:
     return f"{p}{tail}, Indian, natural skin texture, documentary photo"
 
 
+_FULL_RE = re.compile(r"chubby|fat|plump|full|fleshy|heavy|round|puffy|wide")
+_THIN_RE = re.compile(r"thin|slim|lean|gaunt|narrow|skinny|sunken|hollow")
+# Face geometry is changed by warping the existing photo; repainting it with the small
+# inpainting model blurs the identity and cannot reshape the outline.
+WARP_ONLY_REGIONS = {"face_shape", "jaw"}
+
+
+def _implied_adjust(sheet: dict[str, Any]) -> dict[str, float]:
+    """Warp amounts implied by described face shape (e.g. "chubby face" -> fuller cheeks)."""
+    out: dict[str, float] = {}
+    shape = _val(sheet, "face_shape").lower()
+    if _THIN_RE.search(shape):
+        out["face_width"] = -0.12
+    elif _FULL_RE.search(shape):
+        out["face_width"] = 0.12
+    if re.search(r"\blong\b", shape):
+        out["face_length"] = 0.10
+    if re.search(r"\bsquare\b", shape):
+        out["jaw_width"] = 0.08
+    return out
+
+
 def _adjust(sheet: dict[str, Any]) -> dict[str, float]:
+    merged: dict[str, float] = {k: float(v) for k, v in _implied_adjust(sheet).items()}
+    for k, v in (sheet.get(ADJUST_KEY) or {}).items():
+        merged[k] = merged.get(k, 0.0) + float(v)
     return {
-        k: round(float(v), 3)
-        for k, v in (sheet.get(ADJUST_KEY) or {}).items()
-        if abs(float(v)) > 1e-3
+        k: round(max(-0.45, min(0.45, v)), 3) for k, v in merged.items() if abs(v) > 1e-3
     }
 
 
@@ -301,7 +356,10 @@ def _keys(sheet: dict[str, Any], seed: int) -> tuple[str, str, str]:
     prompt = realistic_prompt(sheet)
     adjust = _adjust(sheet)
     photo_key = hashlib.sha256(json.dumps([prompt, seed], sort_keys=True).encode()).hexdigest()
-    final_key = hashlib.sha256(json.dumps([photo_key, adjust], sort_keys=True).encode()).hexdigest()
+    edits = list(sheet.get(EDITS_KEY) or [])
+    final_key = hashlib.sha256(
+        json.dumps([photo_key, adjust, edits], sort_keys=True).encode()
+    ).hexdigest()
     return prompt, photo_key, final_key
 
 
@@ -396,6 +454,8 @@ class _Live:
     base_model: str = ""
     # Snapshot of FACE field values at the time the base was generated (used for diffing).
     base_fields: dict[str, str] = field(default_factory=dict)
+    # Free-form appearance edits already painted into base_photo (or attempted).
+    applied_edits: list[str] = field(default_factory=list)
 
 
 _live: dict[str, _Live] = {}
@@ -418,6 +478,55 @@ def _save_base(st: _Live, photo_entry: dict[str, Any], sheet: dict[str, Any]) ->
     st.base_provider = photo_entry["provider"]
     st.base_model = photo_entry["model"]
     st.base_fields = {k: _val(sheet, k) for k in FACE_FIELDS}
+    st.applied_edits = []  # a fresh face has none of the earlier free-form edits
+
+
+def _pending_edits(st: _Live, sheet: dict[str, Any]) -> list[str]:
+    return [e for e in (sheet.get(EDITS_KEY) or []) if e not in st.applied_edits]
+
+
+async def _apply_free_edits(container: Container, st: _Live, sheet: dict[str, Any]) -> bool:
+    """Paint any new free-form appearance details (hair length, scars, glasses, ...) into the
+    base photo with one FLUX.2 reference-image edit, so no predefined field is needed.
+
+    Keeps the old base on any failure (no face found, provider error, wrong model)."""
+    pending = _pending_edits(st, sheet)
+    if not pending or st.base_photo is None:
+        return False
+    settings = container.settings
+    if settings.mock_mode or "flux-2" not in settings.cf_inpaint_model or not settings.inpaint_chain:
+        return False  # reference editing needs a FLUX.2 model
+    st.applied_edits.extend(pending)  # attempted: never loop on a failing edit
+    h, w = st.base_photo.shape[:2]
+    try:
+        res = await container.providers.inpaint(
+            InpaintRequest(
+                image_png=encode_png(st.base_photo),
+                mask_png=b"",
+                prompt="; ".join(pending),
+                width=w,
+                height=h,
+            )
+        )
+        photo = decode_png(res.png)
+        if photo.shape[:2] != (h, w):
+            photo = cv2.resize(photo, (w, h), interpolation=cv2.INTER_LANCZOS4)
+        faces = await asyncio.to_thread(container.landmarker.detect, photo)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live_render: free-form edit failed (%s)", type(exc).__name__)
+        return False
+    if len(faces) != 1:
+        log.warning("live_render: free-form edit rejected (%d faces found)", len(faces))
+        return False
+    st.base_photo = photo
+    st.base_lm, st.base_lm_source = faces[0], "mediapipe"
+    st.base_provider, st.base_model = res.provider, res.model
+    # The edit already covers whatever the witness said about these features, so do not
+    # repaint the same regions again; identity fields (gender/age/skin/build) still regenerate.
+    for k in FACE_FIELDS:
+        if k not in CORE_FIELDS:
+            st.base_fields[k] = _val(sheet, k)
+    return True
 
 
 def _changed_regions(st: _Live, sheet: dict[str, Any]) -> tuple[list[str], bool]:
@@ -435,6 +544,8 @@ def _changed_regions(st: _Live, sheet: dict[str, Any]) -> tuple[list[str], bool]
         if fk in CORE_FIELDS:
             return [], True
         region = FIELD_TO_REGION.get(fk)
+        if region in WARP_ONLY_REGIONS:
+            continue
         if region and region not in regions:
             regions.append(region)
     return regions, False
@@ -496,9 +607,14 @@ async def portrait_incremental(
     try:
         for region in regions:
             mask = region_binary(lm_norm, region, (h, w))
-            region_prompt = realistic_prompt(sheet)
             photo, provider, model = await inpaint_region(
-                container.providers, photo, mask, region_prompt, seed
+                container.providers,
+                photo,
+                mask,
+                region_prompt(sheet, region),
+                seed,
+                pad_frac=0.6,
+                negative_prompt=REGION_NEGATIVE,
             )
     except Exception as exc:  # noqa: BLE001
         log.warning("live_render: inpaint failed (%s), falling back to full regen", exc)
@@ -558,9 +674,15 @@ async def _worker(container: Container, session_id: str) -> None:
                 pe = _cache.get("photo:" + _keys(sheet, seed)[1])
                 if pe is not None:
                     _save_base(st, pe, sheet)
+                if _pending_edits(st, sheet) and await _apply_free_edits(container, st, sheet):
+                    out = await portrait_incremental(container, st, sheet, seed)
             else:
-                # Subsequent turns — edit only what changed.
+                # Subsequent turns — free-form details first, then edit only what changed.
+                await _apply_free_edits(container, st, sheet)
                 out = await portrait_incremental(container, st, sheet, seed)
+                if _pending_edits(st, sheet) and await _apply_free_edits(container, st, sheet):
+                    out = await portrait_incremental(container, st, sheet, seed)  # base was regenerated
+            out["edits"] = list(sheet.get(EDITS_KEY) or [])
             st.seq += 1
             st.latest, st.latest_key, st.failed = out, key, ""
         except Exception as exc:  # noqa: BLE001
@@ -706,6 +828,8 @@ async def _commit(
 ) -> str:
     latest_v = await sketch_repo.latest_version(db, sess.id)
     edit = {"type": "live", "render": out["kind"], "prompt": out["prompt"], "adjust": out["adjust"]}
+    if out.get("edits"):
+        edit["edits"] = out["edits"]
     if latest_v is not None and latest_v.edit == edit:
         return latest_v.id
     files = container.files

@@ -33,6 +33,8 @@ from app.services.interview.local_templates import ACK, OPENING, REVIEW, UPDATED
 
 ADJUST_KEY = "_adjust"
 ADJUST_LIMIT = 0.45
+EDITS_KEY = "_edits"  # free-form appearance edits (any detail, no fixed field needed)
+MAX_EDITS = 12
 # Live sketching: the face first, so the drawing starts at once; the viewing conditions
 # (light, distance, time, angle) are still asked, at the end.
 STAGE_ORDER = ("overall", "face", "marks", "situation")
@@ -59,6 +61,18 @@ def apply_adjustments(sheet: dict[str, Any], adjustments: list[dict[str, Any]]) 
         v = current.get(param, 0.0) + float(a.get("amount", 0.0))
         current[param] = round(max(-ADJUST_LIMIT, min(ADJUST_LIMIT, v)), 3)
     return current
+
+
+def merge_edits(sheet: dict[str, Any], new: list[Any]) -> list[str]:
+    """Append new free-form appearance edits, keeping order, dropping duplicates."""
+    out: list[str] = [str(e) for e in (sheet.get(EDITS_KEY) or [])]
+    seen = {e.lower() for e in out}
+    for e in new:
+        t = " ".join(str(e).split())[:200]
+        if t and t.lower() not in seen:
+            out.append(t)
+            seen.add(t.lower())
+    return out[-MAX_EDITS:]
 
 
 def public_sheet(sheet: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +227,9 @@ async def turn(
     adjustments = list(data.get("adjustments") or [])
     if adjustments:
         sheet[ADJUST_KEY] = apply_adjustments(sheet, adjustments)
+    visual_edits = list(data.get("visual_edits") or [])
+    if visual_edits:
+        sheet[EDITS_KEY] = merge_edits(sheet, visual_edits)
 
     # ---- answer the open question -------------------------------------------------------------
     if open_q is not None:

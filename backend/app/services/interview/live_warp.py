@@ -64,6 +64,12 @@ def fields(p: np.ndarray, adjust: dict[str, float]) -> list[Field]:
         if name == "jaw_width":
             for i in (JAW_A, JAW_B):
                 fs.append(_push(p[i], out(i) * a * fw * 0.45, 0.0, 0.12 * fw))
+        elif name == "face_width":
+            # fuller (+) / thinner (-) face: push the cheeks and the jaw line outward / inward
+            for i in (CHEEK_A, CHEEK_B):
+                fs.append(_push(p[i], out(i) * a * fw * 0.35, 0.0, 0.20 * fw))
+            for i in (JAW_A, JAW_B):
+                fs.append(_push(p[i], out(i) * a * fw * 0.40, 0.0, 0.14 * fw))
         elif name == "face_length":
             fs.append(_push(p[CHIN], 0.0, a * fw * 0.4, 0.11 * fw))
         elif name == "eye_size":
