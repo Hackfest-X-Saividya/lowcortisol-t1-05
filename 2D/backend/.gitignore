@@ -16,3 +16,4 @@ dist/
 assets/models/*.task
 assets/fonts/*.ttf
 assets/overlays/*.png
+node_modules/

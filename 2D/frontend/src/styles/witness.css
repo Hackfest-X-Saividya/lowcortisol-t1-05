@@ -571,6 +571,12 @@
 .scene-view-btn:hover:not(:disabled):not(.active) {
   background: #e8dcc0;
 }
+.scene-upload-note {
+  margin: 0 0 8px;
+  font-family: var(--font-body, serif);
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
 .scene-view-btn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -578,14 +584,40 @@
 
 /* ── 3D scene frame ─────────────────────────────────────────────────────── */
 .scene-frame-3d {
-  min-height: 480px;
-  height: 520px;
+  min-height: 520px;
+  height: 560px;
   border-radius: 6px;
   overflow: hidden;
 }
-.scene3d-canvas {
+.scene3d-root {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.scene3d-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.scene3d-toolbar .tb-label {
+  font-family: var(--font-body, serif);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.scene3d-toolbar .tb-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--ink-soft, #555);
+  opacity: 0.4;
+  margin: 0 4px;
+}
+.scene3d-canvas {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   position: relative;
   border-radius: 6px;
   overflow: hidden;

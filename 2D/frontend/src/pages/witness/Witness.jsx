@@ -895,6 +895,7 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
   const [words, setWords] = useState(false);
   const [view3d, setView3d] = useState(false);
   const [uploadedScene, setUploadedScene] = useState(null); // scene from floor plan upload
+  const [uploadNote, setUploadNote] = useState("");
   const mapFileRef = useRef(null);
 
   const displayScene = uploadedScene || scene;
@@ -944,6 +945,45 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
     }
   };
 
+  // add / remove / rotate in the 3D view. Uploaded scenes change locally; saved scenes via a patch.
+  const applyEdit = (s, e) => {
+    if (e.type === "add_person") return { ...s, people: [...(s.people || []), e.person] };
+    if (e.type === "remove") return { ...s, [e.coll]: (s[e.coll] || []).filter((_, i) => i !== e.index) };
+    if (e.type === "set") {
+      const arr = [...(s[e.coll] || [])];
+      arr[e.index] = { ...arr[e.index], [e.field]: e.value };
+      return { ...s, [e.coll]: arr };
+    }
+    return s;
+  };
+
+  const edit = async (e) => {
+    if (uploadedScene) {
+      setUploadedScene((s) => applyEdit(s, e));
+      return;
+    }
+    if (!vid) return;
+    const op =
+      e.type === "add_person"
+        ? { op: "add", path: "/people/-", value: e.person }
+        : e.type === "remove"
+          ? { op: "remove", path: `/${e.coll}/${e.index}` }
+          : { op: "replace", path: `/${e.coll}/${e.index}/${e.field}`, value: e.value };
+    // show the change at once, then let the saved version replace it
+    setScene((s) => (s ? applyEdit(s, e) : s));
+    setBusy(true);
+    try {
+      const v = await call(`/scene-versions/${vid}/patches`, { method: "POST", body: { patch: [op], source: "drag" } });
+      setVid(v.id);
+      setScene(v.scene);
+    } catch (err) {
+      fail(err);
+      call(`/scene-versions/${vid}`).then((v) => setScene(v.scene)).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const command = async ({ text, file }) => {
     setBusy(true);
     try {
@@ -972,7 +1012,24 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
       const fd = new FormData();
       fd.append("image", file);
       const result = await call(`/sessions/${sid}/scene/analyze-map`, { method: "POST", form: fd });
-      setUploadedScene(result);
+      const { _error, ...clean } = result || {};
+      const r = clean.room || {};
+      const counts = [
+        [(clean.objects || []).length, "furniture"],
+        [(r.doors || []).length, "door"],
+        [(r.windows || []).length, "window"],
+        [(clean.people || []).length, "person"],
+      ]
+        .filter(([n]) => n > 0)
+        .map(([n, w]) => `${n} ${w}${n > 1 ? (w === "person" ? "" : "s") : ""}`.replace("furnitures", "furniture").replace("1 persons", "1 person"));
+      setUploadNote(
+        _error
+          ? `Could not read the image automatically (${_error}). You can still add people with the buttons above the 3D view.`
+          : counts.length
+            ? `Found from the image: ${counts.join(", ")}.`
+            : "Nothing recognisable was found in that image. Try a clearer photo or floor plan.",
+      );
+      setUploadedScene(clean);
       setView3d(true); // auto-switch to 3D on upload
     } catch (e) {
       fail(e);
@@ -1022,12 +1079,14 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
             }}
           />
           {uploadedScene && (
-            <button className="scene-view-btn" onClick={() => { setUploadedScene(null); setView3d(false); }}>
+            <button className="scene-view-btn" onClick={() => { setUploadedScene(null); setUploadNote(""); setView3d(false); }}>
               ✕ Clear upload
             </button>
           )}
         </div>
       )}
+
+      {uploadNote && <p className="scene-upload-note">{uploadNote}</p>}
 
       {displayScene ? (
         <>
@@ -1038,6 +1097,7 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
                   scene={displayScene}
                   editable={true}
                   onMove={move}
+                  onEdit={edit}
                   personLabel={personLabel}
                 />
               </Suspense>

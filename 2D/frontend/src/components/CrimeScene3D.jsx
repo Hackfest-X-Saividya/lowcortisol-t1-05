@@ -1,113 +1,260 @@
-// CrimeScene3D — fully interactive 3D crime scene viewer using Three.js + drei.
-// Renders the same scene JSON used by SceneMap but in 3D with orbit/select controls.
+// CrimeScene3D — interactive 3D crime-scene viewer (three.js + drei).
+// Renders the same scene JSON as SceneMap. Furniture, doors and windows come from the scene
+// (e.g. detected from an uploaded image); humanoid figures can be added and dragged anywhere.
 //
 // Props:
-//   scene   — scene JSON (same schema as SceneMap)
-//   editable— boolean; when true shows TransformControls on selected objects
-//   onMove  — (collection, index, [x, y, z]) => void
+//   scene       — scene JSON (room, objects, people, evidence)
+//   editable    — when true: drag items on the floor, add / rotate / remove
+//   onMove      — (collection, index, [x, y, z]) => void        (called once, when a drag ends)
+//   onEdit      — (edit) => void, edit is one of
+//                   { type: "add_person", person }
+//                   { type: "remove", coll, index }
+//                   { type: "set", coll, index, field, value }
+//   personLabel — (person) => string
 
-import { Suspense, useRef, useState, useCallback, useEffect } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import {
-  OrbitControls,
-  TransformControls,
-  Text,
-  Grid,
-  Environment,
-  Html,
-  useTexture,
-} from "@react-three/drei";
+import { OrbitControls, Text, Grid } from "@react-three/drei";
 import * as THREE from "three";
 
-// ── colour palette matching the paper/ink UI ───────────────────────────────
 const C = {
-  floor:     "#d6c597",
-  wall:      "#c8b97a",
-  wallTop:   "#b5a35e",
+  floor: "#d6c597",
+  wall: "#c8b97a",
+  wallTop: "#b5a35e",
   furniture: "#b09a5c",
-  suspect:   "#C8321E",
-  witness:   "#14120F",
-  other:     "#8e7c52",
-  evidence:  "#e8c231",
-  door:      "#e4d3a8",
-  window:    "#a0c8e0",
-  grid:      "#a89660",
-  ambient:   "#fff8e7",
-  sky:       "#1a1a2e",
-  selected:  "#ffcc00",
+  suspect: "#C8321E",
+  witness: "#2b4f7a",
+  other: "#6f6a5a",
+  evidence: "#e8c231",
+  door: "#8a5a32",
+  doorFrame: "#5e3d22",
+  window: "#a0c8e0",
+  windowFrame: "#f1ead6",
+  grid: "#a89660",
+  ambient: "#fff8e7",
+  sky: "#1a1a2e",
+  selected: "#ffcc00",
+  skin: "#d8b08c",
+  pants: "#2c2a36",
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+const WALL_H = 3.0;
+const WALL_T = 0.18;
+const DOOR_H = 2.1;
+const WIN_BASE = 0.9;
+const WIN_H = 1.2;
 
-function Box({ pos, size, color, label, selected, onClick, wireframe = false }) {
-  const [x, y, z] = pos;
-  const [w, h, d] = size;
+const roleColor = (role) => (role === "suspect" ? C.suspect : role === "witness" ? C.witness : C.other);
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
+// ── Humanoid figure (front faces -z at facing 0) ──────────────────────────────
+
+function Humanoid({ role, selected, label }) {
+  const cloth = roleColor(role);
+  const glow = selected ? { emissive: C.selected, emissiveIntensity: 0.35 } : {};
+  const mat = (color) => <meshStandardMaterial color={color} roughness={0.85} {...glow} />;
   return (
-    <group position={[x, y + h / 2, z]} onClick={onClick}>
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[w, h, d]} />
+    <group>
+      {/* legs */}
+      {[-0.1, 0.1].map((x) => (
+        <mesh key={x} position={[x, 0.43, 0]} castShadow>
+          <capsuleGeometry args={[0.08, 0.7, 6, 10]} />
+          {mat(C.pants)}
+        </mesh>
+      ))}
+      {/* torso */}
+      <mesh position={[0, 1.2, 0]} scale={[1.15, 1, 0.7]} castShadow>
+        <capsuleGeometry args={[0.16, 0.4, 8, 12]} />
+        {mat(cloth)}
+      </mesh>
+      {/* arms */}
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * 0.28, 1.17, 0]} rotation={[0, 0, s * 0.08]} castShadow>
+          <capsuleGeometry args={[0.055, 0.55, 6, 10]} />
+          {mat(cloth)}
+        </mesh>
+      ))}
+      {/* neck + head + nose (shows which way the person faces) */}
+      <mesh position={[0, 1.59, 0]} castShadow>
+        <cylinderGeometry args={[0.05, 0.055, 0.1, 10]} />
+        {mat(C.skin)}
+      </mesh>
+      <mesh position={[0, 1.7, 0]} castShadow>
+        <sphereGeometry args={[0.115, 20, 16]} />
+        {mat(C.skin)}
+      </mesh>
+      <mesh position={[0, 1.69, -0.12]} rotation={[-Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.025, 0.06, 8]} />
+        {mat("#b98f6c")}
+      </mesh>
+      {/* floor ring + facing arrow */}
+      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.34, 0.4, 32]} />
+        <meshBasicMaterial color={selected ? C.selected : cloth} transparent opacity={selected ? 0.95 : 0.55} />
+      </mesh>
+      <mesh position={[0, 0.012, -0.55]} rotation={[-Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.09, 0.2, 3]} />
+        <meshBasicMaterial color={selected ? C.selected : "#e4d3a8"} />
+      </mesh>
+      {/* generous invisible hit area so the figure is easy to grab */}
+      <mesh position={[0, 0.95, 0]}>
+        <cylinderGeometry args={[0.45, 0.45, 1.9, 12]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {label && (
+        <Text
+          position={[0, 2.05, 0]}
+          fontSize={0.22}
+          color="#14120F"
+          anchorX="center"
+          anchorY="bottom"
+          outlineWidth={0.02}
+          outlineColor="#e4d3a8"
+        >
+          {label}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+// ── Furniture, shaped by type ─────────────────────────────────────────────────
+
+const kindOf = (t = "") => {
+  t = t.toLowerCase();
+  if (/bed|cot|mattress/.test(t)) return "bed";
+  if (/sofa|couch|settee/.test(t)) return "sofa";
+  if (/chair|stool|bench/.test(t)) return "chair";
+  if (/table|desk|counter/.test(t)) return "table";
+  if (/\btv\b|television|monitor/.test(t)) return "tv";
+  if (/cabinet|wardrobe|shelf|bookcase|almirah|fridge|refrigerator|cupboard|locker|dresser|rack|stove|oven/.test(t))
+    return "cabinet";
+  return "box";
+};
+
+function Part({ p, s, c }) {
+  return (
+    <mesh position={p} castShadow receiveShadow>
+      <boxGeometry args={s} />
+      <meshStandardMaterial color={c} roughness={0.85} metalness={0.05} />
+    </mesh>
+  );
+}
+
+function FurnitureShape({ type, size, color }) {
+  const [w, h, d] = size;
+  const kind = kindOf(type);
+  const dark = new THREE.Color(color).multiplyScalar(0.75).getStyle();
+  const legs = (top) =>
+    [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ].map(([sx, sz], i) => (
+      <Part key={i} p={[sx * (w / 2 - 0.05), top / 2, sz * (d / 2 - 0.05)]} s={[0.06, top, 0.06]} c={dark} />
+    ));
+
+  if (kind === "table")
+    return (
+      <>
+        <Part p={[0, h - 0.03, 0]} s={[w, 0.06, d]} c={color} />
+        {legs(h - 0.06)}
+      </>
+    );
+  if (kind === "chair")
+    return (
+      <>
+        <Part p={[0, h * 0.5, 0]} s={[w, 0.06, d]} c={color} />
+        <Part p={[0, h * 0.75, -d / 2 + 0.03]} s={[w, h * 0.5, 0.05]} c={color} />
+        {legs(h * 0.5)}
+      </>
+    );
+  if (kind === "bed")
+    return (
+      <>
+        <Part p={[0, h * 0.22, 0]} s={[w, h * 0.44, d]} c={dark} />
+        <Part p={[0, h * 0.44 + h * 0.15, 0.03]} s={[w - 0.06, h * 0.3, d - 0.1]} c="#efe6cf" />
+        <Part p={[0, h * 0.74 + 0.04, -d / 2 + 0.3]} s={[w * 0.6, 0.1, 0.35]} c="#fffaf0" />
+        <Part p={[0, h / 2, -d / 2 + 0.03]} s={[w, h, 0.06]} c={color} />
+      </>
+    );
+  if (kind === "sofa")
+    return (
+      <>
+        <Part p={[0, h * 0.22, 0]} s={[w, h * 0.44, d]} c={color} />
+        <Part p={[0, h * 0.5, -d / 2 + 0.1]} s={[w, h, 0.2]} c={color} />
+        {[-1, 1].map((s) => (
+          <Part key={s} p={[s * (w / 2 - 0.09), h * 0.35, 0]} s={[0.18, h * 0.7, d]} c={dark} />
+        ))}
+      </>
+    );
+  if (kind === "tv")
+    return (
+      <>
+        <Part p={[0, h * 0.05, 0]} s={[w * 0.3, h * 0.1, d * 0.6]} c={dark} />
+        <Part p={[0, h * 0.55, 0]} s={[w, h * 0.85, Math.min(d, 0.06)]} c="#1c1c22" />
+      </>
+    );
+  if (kind === "cabinet")
+    return (
+      <>
+        <Part p={[0, h / 2, 0]} s={[w, h, d]} c={color} />
+        <Part p={[0, h / 2, d / 2 + 0.005]} s={[0.02, h * 0.9, 0.01]} c={dark} />
+        <Part p={[w * 0.08, h / 2, d / 2 + 0.02]} s={[0.04, 0.12, 0.03]} c="#d8d2c0" />
+      </>
+    );
+  return <Part p={[0, h / 2, 0]} s={[w, h, d]} c={color} />;
+}
+
+function Furniture({ o, pos, selected, onDown, onClick, label }) {
+  const color = o.locked ? C.suspect : C.furniture;
+  const [w, h, d] = o.size;
+  return (
+    <group
+      position={[pos[0], pos[1], pos[2]]}
+      rotation={[0, (-(o.rot_y_deg || 0) * Math.PI) / 180, 0]}
+      onPointerDown={onDown}
+      onClick={onClick}
+    >
+      <FurnitureShape type={o.type} size={o.size} color={color} />
+      {selected && (
+        <mesh position={[0, h / 2, 0]}>
+          <boxGeometry args={[w + 0.08, h + 0.08, d + 0.08]} />
+          <meshBasicMaterial color={C.selected} transparent opacity={0.25} depthWrite={false} />
+        </mesh>
+      )}
+      {label && (
+        <Text
+          position={[0, h + 0.15, 0]}
+          fontSize={0.2}
+          color="#14120F"
+          anchorX="center"
+          anchorY="bottom"
+          outlineWidth={0.02}
+          outlineColor="#e4d3a8"
+        >
+          {label}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+function EvidenceMarker({ pos, label, selected, onDown, onClick }) {
+  return (
+    <group position={[pos[0], pos[1], pos[2]]} onPointerDown={onDown} onClick={onClick}>
+      <mesh position={[0, 0.08, 0]}>
+        <sphereGeometry args={[0.14, 16, 16]} />
         <meshStandardMaterial
-          color={selected ? C.selected : color}
-          roughness={0.85}
-          metalness={0.05}
-          wireframe={wireframe}
+          color={selected ? C.selected : C.evidence}
+          emissive={C.evidence}
+          emissiveIntensity={0.4}
         />
       </mesh>
       {label && (
-        <Text
-          position={[0, h / 2 + 0.15, 0]}
-          fontSize={0.22}
-          color="#14120F"
-          anchorX="center"
-          anchorY="bottom"
-          outlineWidth={0.02}
-          outlineColor="#e4d3a8"
-        >
-          {label}
-        </Text>
-      )}
-      {selected && (
-        <mesh>
-          <boxGeometry args={[w + 0.04, h + 0.04, d + 0.04]} />
-          <meshStandardMaterial color={C.selected} transparent opacity={0.15} />
-        </mesh>
-      )}
-    </group>
-  );
-}
-
-function PersonFigure({ pos, facingDeg, color, label, selected, onClick }) {
-  const [x, , z] = pos;
-  const bodyH = 1.6;
-  const headR = 0.18;
-  const angle = (facingDeg * Math.PI) / 180;
-  return (
-    <group position={[x, 0, z]} rotation={[0, -angle, 0]} onClick={onClick}>
-      {/* Body */}
-      <mesh position={[0, bodyH / 2, 0]} castShadow>
-        <capsuleGeometry args={[0.2, bodyH - 0.4, 8, 8]} />
-        <meshStandardMaterial color={selected ? C.selected : color} roughness={0.9} />
-      </mesh>
-      {/* Head */}
-      <mesh position={[0, bodyH + headR, 0]} castShadow>
-        <sphereGeometry args={[headR, 16, 16]} />
-        <meshStandardMaterial color={selected ? C.selected : color} roughness={0.9} />
-      </mesh>
-      {/* Facing arrow */}
-      <mesh position={[0, bodyH * 0.8, -0.3]} rotation={[Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.07, 0.25, 8]} />
-        <meshStandardMaterial color="#e4d3a8" />
-      </mesh>
-      {label && (
-        <Text
-          position={[0, bodyH + headR * 2 + 0.1, 0]}
-          fontSize={0.22}
-          color="#14120F"
-          anchorX="center"
-          anchorY="bottom"
-          outlineWidth={0.02}
-          outlineColor="#e4d3a8"
-        >
+        <Text position={[0, 0.38, 0]} fontSize={0.18} color={C.evidence} anchorX="center">
           {label}
         </Text>
       )}
@@ -115,19 +262,70 @@ function PersonFigure({ pos, facingDeg, color, label, selected, onClick }) {
   );
 }
 
-function EvidenceMarker({ pos, label, selected, onClick }) {
-  const [x, , z] = pos;
+// ── Room: walls with real openings, door leaves, window glass ────────────────
+
+function wallPlace(room, wall, offset, width) {
+  const W = room.width_m;
+  const D = room.depth_m;
+  const len = wall === "north" || wall === "south" ? W : D;
+  const o = clamp(Number(offset) || 0, 0, len - 0.2);
+  const w = clamp(Number(width) || 0.9, 0.2, len - o);
+  const mid = o + w / 2;
+  if (wall === "north") return { x: mid, z: 0, rotY: 0, o, w, len };
+  if (wall === "south") return { x: mid, z: D, rotY: 0, o, w, len };
+  if (wall === "west") return { x: 0, z: mid, rotY: Math.PI / 2, o, w, len };
+  return { x: W, z: mid, rotY: Math.PI / 2, o, w, len };
+}
+
+function WallPiece({ room, wall, start, length, y0, y1 }) {
+  if (length < 0.02 || y1 - y0 < 0.02) return null;
+  const p = wallPlace(room, wall, start, length);
   return (
-    <group position={[x, 0, z]} onClick={onClick}>
-      <mesh position={[0, 0.06, 0]}>
-        <sphereGeometry args={[0.12, 16, 16]} />
-        <meshStandardMaterial color={selected ? C.selected : C.evidence} emissive={C.evidence} emissiveIntensity={0.4} />
+    <mesh position={[p.x, (y0 + y1) / 2, p.z]} rotation={[0, p.rotY, 0]} castShadow receiveShadow>
+      <boxGeometry args={[length, y1 - y0, WALL_T]} />
+      <meshStandardMaterial color={C.wall} roughness={0.9} />
+    </mesh>
+  );
+}
+
+function DoorMesh({ room, door }) {
+  const p = wallPlace(room, door.wall, door.offset_m, door.width_m);
+  const fw = 0.06;
+  return (
+    <group position={[p.x, 0, p.z]} rotation={[0, p.rotY, 0]}>
+      {/* frame */}
+      <Part p={[-p.w / 2 + fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, WALL_T + 0.04]} c={C.doorFrame} />
+      <Part p={[p.w / 2 - fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, WALL_T + 0.04]} c={C.doorFrame} />
+      <Part p={[0, DOOR_H - fw / 2, 0]} s={[p.w, fw, WALL_T + 0.04]} c={C.doorFrame} />
+      {/* leaf, hinged on one side and swung part-open */}
+      <group position={[-p.w / 2 + fw, 0, 0]} rotation={[0, -1.05, 0]}>
+        <Part p={[(p.w - 2 * fw) / 2, (DOOR_H - fw) / 2, 0]} s={[p.w - 2 * fw, DOOR_H - fw, 0.045]} c={C.door} />
+        <Part p={[p.w - 2 * fw - 0.1, 1.0, 0.04]} s={[0.06, 0.04, 0.05]} c="#d8d2c0" />
+      </group>
+      <Text position={[0, DOOR_H + 0.2, 0]} fontSize={0.16} color="#14120F" anchorX="center" outlineWidth={0.015} outlineColor="#e4d3a8">
+        door
+      </Text>
+    </group>
+  );
+}
+
+function WindowMesh({ room, win }) {
+  const p = wallPlace(room, win.wall, win.offset_m, win.width_m);
+  const ft = 0.05;
+  return (
+    <group position={[p.x, 0, p.z]} rotation={[0, p.rotY, 0]}>
+      <mesh position={[0, WIN_BASE + WIN_H / 2, 0]}>
+        <planeGeometry args={[p.w, WIN_H]} />
+        <meshStandardMaterial color={C.window} transparent opacity={0.45} side={THREE.DoubleSide} />
       </mesh>
-      {label && (
-        <Text position={[0, 0.32, 0]} fontSize={0.18} color={C.evidence} anchorX="center">
-          {label}
-        </Text>
-      )}
+      <Part p={[0, WIN_BASE + ft / 2, 0]} s={[p.w, ft, WALL_T + 0.04]} c={C.windowFrame} />
+      <Part p={[0, WIN_BASE + WIN_H - ft / 2, 0]} s={[p.w, ft, WALL_T + 0.04]} c={C.windowFrame} />
+      <Part p={[-p.w / 2 + ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, WALL_T + 0.04]} c={C.windowFrame} />
+      <Part p={[p.w / 2 - ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, WALL_T + 0.04]} c={C.windowFrame} />
+      <Part p={[0, WIN_BASE + WIN_H / 2, 0]} s={[ft * 0.6, WIN_H, 0.03]} c={C.windowFrame} />
+      <Text position={[0, WIN_BASE + WIN_H + 0.2, 0]} fontSize={0.16} color="#14120F" anchorX="center" outlineWidth={0.015} outlineColor="#e4d3a8">
+        window
+      </Text>
     </group>
   );
 }
@@ -135,213 +333,167 @@ function EvidenceMarker({ pos, label, selected, onClick }) {
 function Room({ room }) {
   const W = room.width_m;
   const D = room.depth_m;
-  const wallH = 3.0;
-  const wallT = 0.18;
   const doors = room.doors || [];
   const windows = room.windows || [];
 
-  // Build walls as sets of sub-segments with gaps for doors/windows
-  const wallSegments = [];
+  const pieces = [];
+  ["north", "south", "west", "east"].forEach((wall) => {
+    const len = wall === "north" || wall === "south" ? W : D;
+    const ops = [
+      ...doors.filter((d) => d.wall === wall).map((d) => ({ ...wallPlace(room, wall, d.offset_m, d.width_m), kind: "door" })),
+      ...windows.filter((w) => w.wall === wall).map((w) => ({ ...wallPlace(room, wall, w.offset_m, w.width_m), kind: "window" })),
+    ].sort((a, b) => a.o - b.o);
 
-  const makeWallSegments = (wallName, totalLength, isNS) => {
-    // Gather openings on this wall
-    const openings = [
-      ...doors.filter((d) => d.wall === wallName),
-      ...windows.filter((w) => w.wall === wallName),
-    ].map((o) => ({ start: o.offset_m, end: o.offset_m + o.width_m, isDoor: "offset_m" in o && !("eye_height_m" in o) }));
-    openings.sort((a, b) => a.start - b.start);
-
-    // Fill gaps between openings
     let cursor = 0;
-    const segs = [];
-    for (const op of openings) {
-      if (cursor < op.start) segs.push({ start: cursor, end: op.start });
-      cursor = op.end;
-    }
-    if (cursor < totalLength) segs.push({ start: cursor, end: totalLength });
-    return segs.map((s) => ({ wallName, start: s.start, length: s.end - s.start, isNS }));
-  };
-
-  wallSegments.push(...makeWallSegments("north", W, false));
-  wallSegments.push(...makeWallSegments("south", W, false));
-  wallSegments.push(...makeWallSegments("west", D, true));
-  wallSegments.push(...makeWallSegments("east", D, true));
+    ops.forEach((op, i) => {
+      if (cursor < op.o) pieces.push({ key: `${wall}-g${i}`, wall, start: cursor, length: op.o - cursor, y0: 0, y1: WALL_H });
+      if (op.kind === "door") {
+        pieces.push({ key: `${wall}-l${i}`, wall, start: op.o, length: op.w, y0: DOOR_H, y1: WALL_H });
+      } else {
+        pieces.push({ key: `${wall}-s${i}`, wall, start: op.o, length: op.w, y0: 0, y1: WIN_BASE });
+        pieces.push({ key: `${wall}-h${i}`, wall, start: op.o, length: op.w, y0: WIN_BASE + WIN_H, y1: WALL_H });
+      }
+      cursor = Math.max(cursor, op.o + op.w);
+    });
+    if (cursor < len) pieces.push({ key: `${wall}-end`, wall, start: cursor, length: len - cursor, y0: 0, y1: WALL_H });
+  });
 
   return (
     <group>
-      {/* Floor */}
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[W / 2, 0, D / 2]}>
         <planeGeometry args={[W, D]} />
         <meshStandardMaterial color={C.floor} roughness={0.95} />
       </mesh>
-
-      {/* Wall segments */}
-      {wallSegments.map((seg, i) => {
-        let px, pz, geoW;
-        if (seg.wallName === "north") {
-          pz = 0; px = seg.start + seg.length / 2; geoW = seg.length;
-          return (
-            <mesh key={i} position={[px, wallH / 2, pz]} castShadow receiveShadow>
-              <boxGeometry args={[geoW, wallH, wallT]} />
-              <meshStandardMaterial color={C.wall} roughness={0.9} />
-            </mesh>
-          );
-        }
-        if (seg.wallName === "south") {
-          pz = D; px = seg.start + seg.length / 2; geoW = seg.length;
-          return (
-            <mesh key={i} position={[px, wallH / 2, pz]} castShadow receiveShadow>
-              <boxGeometry args={[geoW, wallH, wallT]} />
-              <meshStandardMaterial color={C.wall} roughness={0.9} />
-            </mesh>
-          );
-        }
-        if (seg.wallName === "west") {
-          px = 0; pz = seg.start + seg.length / 2; geoW = seg.length;
-          return (
-            <mesh key={i} position={[px, wallH / 2, pz]} castShadow receiveShadow>
-              <boxGeometry args={[wallT, wallH, geoW]} />
-              <meshStandardMaterial color={C.wall} roughness={0.9} />
-            </mesh>
-          );
-        }
-        // east
-        px = W; pz = seg.start + seg.length / 2; geoW = seg.length;
-        return (
-          <mesh key={i} position={[px, wallH / 2, pz]} castShadow receiveShadow>
-            <boxGeometry args={[wallT, wallH, geoW]} />
-            <meshStandardMaterial color={C.wall} roughness={0.9} />
-          </mesh>
-        );
-      })}
-
-      {/* Window indicators (blue tinted gaps) */}
-      {windows.map((w) => {
-        let px, pz, geoW, rotY = 0;
-        const winH = 1.2, winBase = 0.9;
-        if (w.wall === "north") { pz = 0; px = w.offset_m + w.width_m / 2; geoW = w.width_m; }
-        else if (w.wall === "south") { pz = D; px = w.offset_m + w.width_m / 2; geoW = w.width_m; }
-        else if (w.wall === "west") { px = 0; pz = w.offset_m + w.width_m / 2; geoW = w.width_m; rotY = Math.PI / 2; }
-        else { px = W; pz = w.offset_m + w.width_m / 2; geoW = w.width_m; rotY = Math.PI / 2; }
-        return (
-          <mesh key={w.id} position={[px, winBase + winH / 2, pz]} rotation={[0, rotY, 0]}>
-            <planeGeometry args={[geoW, winH]} />
-            <meshStandardMaterial color={C.window} transparent opacity={0.5} side={THREE.DoubleSide} />
-          </mesh>
-        );
-      })}
+      {pieces.map(({ key, ...rest }) => (
+        <WallPiece key={key} room={room} {...rest} />
+      ))}
+      {doors.map((d) => (
+        <DoorMesh key={d.id} room={room} door={d} />
+      ))}
+      {windows.map((w) => (
+        <WindowMesh key={w.id} room={room} win={w} />
+      ))}
     </group>
   );
 }
 
-// ── Selection-aware transform wrapper ─────────────────────────────────────
+// ── Scene content: selection, floor-plane dragging, camera ───────────────────
 
-function SelectableTransform({ children, selected, onMove, position }) {
-  const objRef = useRef();
+function SceneContent({ scene, editable, onMove, personLabel, sel, setSel }) {
   const { camera, gl } = useThree();
+  const [drag, setDrag] = useState(null); // { coll, index, dx, dz }
+  const [live, setLive] = useState(null); // { coll, index, pos }
+  const liveRef = useRef(null);
+  const room = scene.room;
 
-  return (
-    <group ref={objRef} position={position}>
-      {selected && (
-        <TransformControls
-          object={objRef}
-          mode="translate"
-          onObjectChange={() => {
-            if (objRef.current) {
-              const p = objRef.current.position;
-              onMove?.([p.x, p.y, p.z]);
-            }
-          }}
-        />
-      )}
-      {children}
-    </group>
+  // While dragging, follow the pointer across the floor plane (works anywhere in the room).
+  useEffect(() => {
+    if (!drag) return undefined;
+    const el = gl.domElement;
+    const rc = new THREE.Raycaster();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    const ndc = new THREE.Vector2();
+    const item = scene[drag.coll]?.[drag.index];
+    const half = drag.coll === "objects" && item ? [item.size[0] / 2, item.size[2] / 2] : [0.25, 0.25];
+
+    const move = (ev) => {
+      const r = el.getBoundingClientRect();
+      ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+      rc.setFromCamera(ndc, camera);
+      if (!rc.ray.intersectPlane(plane, hit)) return;
+      const x = clamp(hit.x + drag.dx, half[0], room.width_m - half[0]);
+      const z = clamp(hit.z + drag.dz, half[1], room.depth_m - half[1]);
+      const next = { coll: drag.coll, index: drag.index, pos: [x, item?.pos?.[1] || 0, z] };
+      liveRef.current = next;
+      setLive(next);
+    };
+    const up = () => {
+      const l = liveRef.current;
+      liveRef.current = null;
+      setDrag(null);
+      setLive(null);
+      if (l) onMove?.(l.coll, l.index, l.pos);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag]);
+
+  const startDrag = useCallback(
+    (coll, index, item) => (e) => {
+      e.stopPropagation();
+      setSel({ coll, index });
+      if (!editable || item.locked) return;
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const p = new THREE.Vector3();
+      const hit = e.ray.intersectPlane(plane, p);
+      setDrag({
+        coll,
+        index,
+        dx: hit ? item.pos[0] - p.x : 0,
+        dz: hit ? item.pos[2] - p.z : 0,
+      });
+    },
+    [editable, setSel],
   );
-}
 
-// ── Main 3D Scene content ──────────────────────────────────────────────────
-
-function SceneContent({ scene, editable, onMove, personLabel }) {
-  const [sel, setSel] = useState(null); // {coll, index}
-
-  const selectItem = useCallback((coll, index) => (e) => {
-    e.stopPropagation();
-    setSel((s) => s?.coll === coll && s?.index === index ? null : { coll, index });
-  }, []);
-
-  const moveItem = useCallback((coll, index) => ([x, y, z]) => {
-    onMove?.(coll, index, [x, y, z]);
-  }, [onMove]);
-
-  if (!scene?.room) return null;
+  const swallowClick = useCallback((e) => e.stopPropagation(), []);
+  const posOf = (coll, index, item) => (live && live.coll === coll && live.index === index ? live.pos : item.pos);
+  const isSel = (coll, index) => sel?.coll === coll && sel?.index === index;
 
   return (
     <>
-      {/* Lighting */}
       <ambientLight intensity={0.7} color={C.ambient} />
-      <directionalLight
-        position={[scene.room.width_m / 2, 6, scene.room.depth_m / 2]}
-        intensity={1.2}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-      />
-      <pointLight position={[scene.room.width_m / 2, 2.5, scene.room.depth_m / 2]} intensity={0.4} color="#ffe8c0" />
+      <directionalLight position={[room.width_m / 2, 6, room.depth_m / 2]} intensity={1.2} castShadow shadow-mapSize={[2048, 2048]} />
+      <pointLight position={[room.width_m / 2, 2.5, room.depth_m / 2]} intensity={0.4} color="#ffe8c0" />
 
-      {/* Room structure */}
-      <Room room={scene.room} />
+      <Room room={room} />
 
-      {/* Objects / furniture */}
-      {(scene.objects || []).map((o, i) => {
-        const isSel = sel?.coll === "objects" && sel?.index === i;
-        return (
-          <Box
-            key={o.id}
-            pos={o.pos}
-            size={o.size}
-            color={o.locked ? C.suspect : C.furniture}
-            label={o.type}
-            selected={isSel}
-            onClick={selectItem("objects", i)}
-          />
-        );
-      })}
+      {(scene.objects || []).map((o, i) => (
+        <Furniture
+          key={o.id}
+          o={o}
+          pos={posOf("objects", i, o)}
+          label={o.type}
+          selected={isSel("objects", i)}
+          onDown={startDrag("objects", i, o)}
+          onClick={swallowClick}
+        />
+      ))}
 
-      {/* People */}
-      {(scene.people || []).map((p, i) => {
-        const isSel = sel?.coll === "people" && sel?.index === i;
-        const color = p.role === "suspect" ? C.suspect : p.role === "witness" ? C.witness : C.other;
-        const label = personLabel ? personLabel(p) : p.id;
-        return (
-          <PersonFigure
-            key={p.id}
-            pos={p.pos}
-            facingDeg={p.facing_deg || 0}
-            color={color}
-            label={label}
-            selected={isSel}
-            onClick={selectItem("people", i)}
-          />
-        );
-      })}
+      {(scene.people || []).map((p, i) => (
+        <group
+          key={p.id}
+          position={posOf("people", i, p)}
+          rotation={[0, (-(p.facing_deg || 0) * Math.PI) / 180, 0]}
+          onPointerDown={startDrag("people", i, p)}
+          onClick={swallowClick}
+        >
+          <Humanoid role={p.role} selected={isSel("people", i)} label={personLabel ? personLabel(p) : p.id} />
+        </group>
+      ))}
 
-      {/* Evidence */}
-      {(scene.evidence || []).map((ev, i) => {
-        const isSel = sel?.coll === "evidence" && sel?.index === i;
-        return (
-          <EvidenceMarker
-            key={ev.id}
-            pos={ev.pos}
-            label={ev.label}
-            selected={isSel}
-            onClick={selectItem("evidence", i)}
-          />
-        );
-      })}
+      {(scene.evidence || []).map((ev, i) => (
+        <EvidenceMarker
+          key={ev.id}
+          pos={posOf("evidence", i, ev)}
+          label={ev.label}
+          selected={isSel("evidence", i)}
+          onDown={startDrag("evidence", i, ev)}
+          onClick={swallowClick}
+        />
+      ))}
 
-      {/* Grid helper */}
       <Grid
-        args={[scene.room.width_m + 4, scene.room.depth_m + 4]}
-        position={[scene.room.width_m / 2, -0.001, scene.room.depth_m / 2]}
+        args={[room.width_m + 4, room.depth_m + 4]}
+        position={[room.width_m / 2, -0.001, room.depth_m / 2]}
         cellSize={1}
         cellThickness={0.5}
         cellColor={C.grid}
@@ -354,20 +506,16 @@ function SceneContent({ scene, editable, onMove, personLabel }) {
         infiniteGrid={false}
       />
 
-      {/* Click on background deselects */}
-      <mesh
-        position={[scene.room.width_m / 2, -0.01, scene.room.depth_m / 2]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        onClick={() => setSel(null)}
-      >
+      {/* click on empty floor deselects */}
+      <mesh position={[room.width_m / 2, -0.01, room.depth_m / 2]} rotation={[-Math.PI / 2, 0, 0]} onClick={() => setSel(null)}>
         <planeGeometry args={[100, 100]} />
-        <meshBasicMaterial transparent opacity={0} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Camera controls */}
       <OrbitControls
         makeDefault
-        target={[scene.room.width_m / 2, 0, scene.room.depth_m / 2]}
+        enabled={!drag}
+        target={[room.width_m / 2, 0, room.depth_m / 2]}
         maxPolarAngle={Math.PI / 2}
         minDistance={2}
         maxDistance={50}
@@ -378,48 +526,107 @@ function SceneContent({ scene, editable, onMove, personLabel }) {
   );
 }
 
-// ── Public component ───────────────────────────────────────────────────────
+// ── Public component ─────────────────────────────────────────────────────────
 
-export default function CrimeScene3D({ scene, editable = false, onMove, personLabel }) {
+export default function CrimeScene3D({ scene, editable = false, onMove, onEdit, personLabel }) {
+  const [sel, setSel] = useState(null);
   if (!scene?.room) return null;
 
-  const cx = scene.room.width_m / 2;
-  const cz = scene.room.depth_m / 2;
-  const dist = Math.max(scene.room.width_m, scene.room.depth_m) * 1.5;
+  const room = scene.room;
+  const cx = room.width_m / 2;
+  const cz = room.depth_m / 2;
+  const dist = Math.max(room.width_m, room.depth_m) * 1.5;
+
+  const selItem = sel ? scene[sel.coll]?.[sel.index] : null;
+  const selName = !selItem
+    ? ""
+    : sel.coll === "people"
+      ? personLabel?.(selItem) || selItem.id
+      : sel.coll === "evidence"
+        ? selItem.label
+        : selItem.type;
+  const canEdit = editable && !!onEdit;
+
+  const addPerson = (role) => {
+    const n = (scene.people || []).length;
+    const person = {
+      id: `${role}_${Date.now().toString(36)}`,
+      role,
+      pos: [clamp(cx + (n % 4) * 0.7 - 1, 0.3, room.width_m - 0.3), 0, clamp(cz + Math.floor(n / 4) * 0.7, 0.3, room.depth_m - 0.3)],
+      facing_deg: 0,
+      eye_height_m: 1.6,
+    };
+    onEdit({ type: "add_person", person });
+    setSel({ coll: "people", index: n });
+  };
+
+  const rotate = (delta) => {
+    if (!selItem || sel.coll === "evidence") return;
+    const field = sel.coll === "people" ? "facing_deg" : "rot_y_deg";
+    const cur = Number(selItem[field] || 0);
+    onEdit({ type: "set", coll: sel.coll, index: sel.index, field, value: (((cur + delta) % 360) + 360) % 360 });
+  };
+
+  const remove = () => {
+    if (!selItem) return;
+    onEdit({ type: "remove", coll: sel.coll, index: sel.index });
+    setSel(null);
+  };
 
   return (
-    <div className="scene3d-canvas">
-      <Canvas
-        shadows
-        camera={{
-          position: [cx + dist * 0.6, dist * 0.7, cz + dist * 0.8],
-          fov: 45,
-          near: 0.1,
-          far: 200,
-        }}
-        gl={{ antialias: true, alpha: false }}
-        style={{ background: C.sky }}
-      >
-        <Suspense fallback={null}>
-          <SceneContent
-            scene={scene}
-            editable={editable}
-            onMove={onMove}
-            personLabel={personLabel}
-          />
-        </Suspense>
-      </Canvas>
+    <div className="scene3d-root">
+      {canEdit && (
+        <div className="scene3d-toolbar">
+          <span className="tb-label">Add person</span>
+          {["witness", "suspect", "other"].map((role) => (
+            <button key={role} type="button" className="scene-view-btn" onClick={() => addPerson(role)}>
+              ＋ {cap(role)}
+            </button>
+          ))}
+          {selItem && (
+            <>
+              <span className="tb-sep" />
+              <span className="tb-label">Selected: {selName}</span>
+              {sel.coll !== "evidence" && (
+                <>
+                  <button type="button" className="scene-view-btn" title="Turn left 45°" onClick={() => rotate(-45)}>
+                    ↺
+                  </button>
+                  <button type="button" className="scene-view-btn" title="Turn right 45°" onClick={() => rotate(45)}>
+                    ↻
+                  </button>
+                </>
+              )}
+              <button type="button" className="scene-view-btn" onClick={remove}>
+                🗑 Remove
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
-      {/* Legend */}
-      <div className="scene3d-legend">
-        <span className="legend-dot" style={{ background: C.suspect }} /> Suspect
-        <span className="legend-dot" style={{ background: C.witness }} /> Witness
-        <span className="legend-dot" style={{ background: C.evidence }} /> Evidence
-        <span className="legend-dot" style={{ background: C.furniture }} /> Object
-      </div>
+      <div className="scene3d-canvas" style={{ touchAction: "none" }}>
+        <Canvas
+          shadows
+          camera={{ position: [cx + dist * 0.6, dist * 0.7, cz + dist * 0.8], fov: 45, near: 0.1, far: 200 }}
+          gl={{ antialias: true, alpha: false }}
+          style={{ background: C.sky }}
+        >
+          <Suspense fallback={null}>
+            <SceneContent scene={scene} editable={editable} onMove={onMove} personLabel={personLabel} sel={sel} setSel={setSel} />
+          </Suspense>
+        </Canvas>
 
-      <div className="scene3d-hint">
-        🖱 Drag to orbit · Scroll to zoom · Right-drag to pan
+        <div className="scene3d-legend">
+          <span className="legend-dot" style={{ background: C.suspect }} /> Suspect
+          <span className="legend-dot" style={{ background: C.witness }} /> Witness
+          <span className="legend-dot" style={{ background: C.other }} /> Other
+          <span className="legend-dot" style={{ background: C.evidence }} /> Evidence
+          <span className="legend-dot" style={{ background: C.furniture }} /> Furniture
+        </div>
+        <div className="scene3d-hint">
+          {canEdit ? "Click to select · drag to move · drag empty space to orbit · scroll to zoom" : "Drag to orbit · scroll to zoom · right-drag to pan"}
+        </div>
       </div>
     </div>
   );
