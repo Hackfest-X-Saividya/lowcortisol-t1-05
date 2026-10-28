@@ -10,6 +10,7 @@ from app.api.v1 import (
     health,
     interview,
     jobs,
+    live,
     scene,
     sessions,
     signoff,
@@ -24,6 +25,7 @@ api_router.include_router(cases.router, prefix="/cases", tags=["cases"])
 api_router.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
 api_router.include_router(statements.router, tags=["statements"])
 api_router.include_router(interview.router, tags=["interview"])
+api_router.include_router(live.router, tags=["live interview"])
 api_router.include_router(sketch.router, tags=["sketch"])
 api_router.include_router(scene.router, tags=["scene"])
 api_router.include_router(signoff.router, tags=["signoff"])

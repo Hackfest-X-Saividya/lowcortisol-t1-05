@@ -62,36 +62,62 @@ class CloudflareBase:
             await self._client.aclose()
 
 
-class CloudflareImageGen(CloudflareBase):
-    name = "cloudflare"
-
-    def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
-        super().__init__(settings, client)
-        self.model = settings.cf_image_model
-
-    async def generate(self, req: ImageRequest) -> ImageResult:
-        body: dict[str, object] = {
-            "prompt": req.prompt,
-            "width": req.width,
-            "height": req.height,
-        }
+def image_body(model: str, req: ImageRequest) -> dict[str, object]:
+    """Request body for a Workers AI text-to-image model (input names differ per model)."""
+    body: dict[str, object] = {"prompt": req.prompt}
+    if "leonardo" in model:
+        # Leonardo Lucid Origin / Phoenix: realistic portraits; width/height/seed/negative ok
+        body.update({"width": req.width, "height": req.height})
+        steps = req.num_steps or 8
+        body["steps" if "lucid" in model else "num_steps"] = int(steps)
+        if req.negative_prompt:
+            body["negative_prompt"] = req.negative_prompt
+        if req.seed is not None:
+            body["seed"] = int(req.seed)
+    elif "flux" in model:
+        body["steps"] = int(req.num_steps or 4)  # flux-1-schnell takes no seed / size
+    else:
+        body.update({"width": req.width, "height": req.height})
         if req.negative_prompt:
             body["negative_prompt"] = req.negative_prompt
         if req.seed is not None:
             body["seed"] = int(req.seed)
         if req.num_steps is not None:
             body["num_steps"] = int(req.num_steps)
-        body.update(req.extra)
-        resp = await request_with_retries(
-            self._client,
-            "POST",
-            self.base_url + self.model,
-            provider=self.name,
-            max_retries=self.max_retries,
-            json=body,
-        )
-        png = _decode_image_response(resp, self.name)
-        return ImageResult(png=png, provider=self.name, model=self.model, seed=req.seed)
+    body.update(req.extra)
+    return body
+
+
+class CloudflareImageGen(CloudflareBase):
+    """Text-to-image on Workers AI. Tries CF_IMAGE_MODEL, then CF_IMAGE_FALLBACK_MODEL."""
+
+    name = "cloudflare"
+
+    def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(settings, client)
+        self.model = settings.cf_image_model
+        self.models = [m for m in (settings.cf_image_model, settings.cf_image_fallback_model) if m]
+
+    async def generate(self, req: ImageRequest) -> ImageResult:
+        last: ProviderError | None = None
+        for model in self.models:
+            try:
+                resp = await request_with_retries(
+                    self._client,
+                    "POST",
+                    self.base_url + model,
+                    provider=self.name,
+                    max_retries=self.max_retries,
+                    json=image_body(model, req),
+                )
+                png = _decode_image_response(resp, self.name)
+                return ImageResult(png=png, provider=self.name, model=model, seed=req.seed)
+            except ProviderError as exc:
+                last = exc
+                if (exc.details or {}).get("daily_quota"):
+                    break  # one allowance for the whole account: the next model fails too
+        assert last is not None
+        raise last
 
 
 class CloudflareInpainter(CloudflareBase):

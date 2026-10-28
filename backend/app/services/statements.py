@@ -170,6 +170,42 @@ async def correct_statement(
     return st, job
 
 
+async def list_statements(db: AsyncSession, actor: Principal, session_id: str) -> list[Statement]:
+    """All statements of a session in time order (witness: own session; staff: case scope)."""
+    sess, _ = await case_service.load_session(db, actor, session_id)
+    rows = await repo.list_statements(db, sess.id)
+    audit.record(
+        db,
+        actor,
+        "statements.listed",
+        object_type="session",
+        object_id=sess.id,
+        session_id=sess.id,
+        case_id=sess.case_id,
+        details={"count": len(rows)},
+    )
+    await audit.commit_with_audit(db)
+    return rows
+
+
+async def list_questions(db: AsyncSession, actor: Principal, session_id: str) -> list[Any]:
+    """All interview questions of a session with their answers, in the order asked."""
+    sess, _ = await case_service.load_session(db, actor, session_id)
+    rows = await repo.list_questions(db, sess.id)
+    audit.record(
+        db,
+        actor,
+        "questions.listed",
+        object_type="session",
+        object_id=sess.id,
+        session_id=sess.id,
+        case_id=sess.case_id,
+        details={"count": len(rows)},
+    )
+    await audit.commit_with_audit(db)
+    return rows
+
+
 async def get_feature_sheet(db: AsyncSession, actor: Principal, session_id: str) -> dict[str, Any]:
     sess, _ = await case_service.load_session(db, actor, session_id)
     fs = await repo.get_feature_sheet(db, sess.id)

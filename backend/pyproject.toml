@@ -76,3 +76,8 @@ core = "sysmon"
 [tool.coverage.report]
 skip_covered = true
 show_missing = true
+
+[tool.ruff.lint.per-file-ignores]
+# prompt text and translated question templates are prose
+"app/services/interview/prompts.py" = ["E501"]
+"app/services/interview/local_templates.py" = ["E501"]

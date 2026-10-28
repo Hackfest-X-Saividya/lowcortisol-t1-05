@@ -62,20 +62,38 @@ class Settings(BaseSettings):
     # ---- AI providers ---------------------------------------------------------------
     ai_mode: AIMode = "cloud"  # cloud | mock
     cloud_mode_ack: bool = True
-    llm_primary: LLMName = "gemini"  # gemini | groq | mock
+    llm_primary: LLMName = "groq"  # groq | gemini | mock (Groq: fastest for the live interview)
     # Verify the current model names: https://ai.google.dev/gemini-api/docs/models
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
+    # 0 = no "thinking" (fastest, right for a live interview); -1 = model default
+    gemini_thinking_budget: int = 0
+    # Text-to-speech for the interviewer's voice when the browser has none for the language
+    gemini_tts_model: str = "gemini-3.8-flash-tts"
+    gemini_tts_voice: str = "Kore"
+    tts_enabled: bool = True
+    # Seconds a provider is skipped after a quota error (429) or outage, so calls go
+    # straight to the fallback instead of waiting on retries
+    provider_cooldown_s: int = 300
     # Verify in the Groq console: https://console.groq.com/docs/models
     groq_llm_model: str = "openai/gpt-oss-120b"
+    # separate per-model rate limits: used at once when the main model answers 429
+    groq_llm_fallback_model: str = "openai/gpt-oss-20b"
+    groq_reasoning_effort: str = "low"  # low | medium | high (gpt-oss models only)
     # Verify in the Groq console: https://console.groq.com/docs/speech-to-text
     groq_asr_model: str = "whisper-large-v3"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     image_primary: ImageName = "cloudflare"  # cloudflare | pollinations | mock
     # Verify in the Cloudflare Workers AI catalogue: https://developers.cloudflare.com/workers-ai/models/
-    cf_image_model: str = "@cf/bytedance/stable-diffusion-xl-lightning"
+    # Realistic portraits (verified 2026-10-28): Lucid Origin, then Phoenix, then SDXL via chain
+    # flux-1-schnell: realistic and about 50x cheaper in neurons than Lucid Origin (about 60
+    # neurons per portrait, so the 10,000/day free allowance lasts ~150 renders)
+    cf_image_model: str = "@cf/black-forest-labs/flux-1-schnell"
+    cf_image_fallback_model: str = "@cf/stabilityai/stable-diffusion-xl-base-1.0"
     cf_inpaint_model: str = "@cf/runwayml/stable-diffusion-v1-5-inpainting"
     cloudflare_base_url: str = "https://api.cloudflare.com/client/v4"
     pollinations_base_url: str = "https://image.pollinations.ai/prompt"
+    pollinations_model: str = "flux"
+    pollinations_timeout_s: float = 45.0
     inpaint_enabled: bool = True
     provider_cache: bool = True
     http_timeout_s: float = 60.0
@@ -106,6 +124,7 @@ class Settings(BaseSettings):
 
     # ---- interview ------------------------------------------------------------------
     interview_max_questions: int = 12
+    interview_live_max_questions: int = 24  # live sketch interview asks more, shorter questions
 
     @field_validator("cors_origins")
     @classmethod

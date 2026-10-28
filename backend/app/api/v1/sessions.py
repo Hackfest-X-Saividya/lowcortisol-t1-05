@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from fastapi import APIRouter, status
 
-from app.api.deps import DbDep, PrincipalDep, StaffDep
-from app.schemas.sessions import DisplayEventCreate, DisplayEventOut, SessionDetail, SessionOut
+from app.api.deps import ContainerDep, DbDep, PrincipalDep, StaffDep
+from app.schemas.sessions import (
+    DisplayEventCreate,
+    DisplayEventOut,
+    SessionCreated,
+    SessionDetail,
+    SessionOut,
+)
 from app.services import cases as case_service
 
 router = APIRouter()
+
+
+@router.post("/{session_id}/witness-token", response_model=SessionCreated)
+async def reissue_witness_token(
+    session_id: str, principal: StaffDep, db: DbDep, container: ContainerDep
+) -> SessionCreated:
+    """Issue a new witness code for an open session; the previous code stops working."""
+    sess, token = await case_service.reissue_witness_token(
+        db, container.settings, principal, session_id
+    )
+    return SessionCreated(session=SessionOut.model_validate(sess), witness_token=token)
 
 
 @router.get("/{session_id}", response_model=SessionDetail)

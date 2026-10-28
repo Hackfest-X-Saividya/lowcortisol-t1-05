@@ -177,7 +177,7 @@ def build_report(
     story.append(_p("Feature sheet", h2))
     rows = [["Field", "Value", "Confidence", "Source text"]]
     for key, entry in sorted(feature_sheet.items()):
-        if not isinstance(entry, dict):
+        if key.startswith("_") or not isinstance(entry, dict):
             continue
         rows.append(
             [

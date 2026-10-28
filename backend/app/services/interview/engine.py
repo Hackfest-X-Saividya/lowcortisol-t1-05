@@ -48,14 +48,18 @@ def _matches(sheet: dict[str, Any], key: str, fragment: str) -> bool:
 
 
 def next_step(
-    sheet: dict[str, Any], asked: list[dict[str, str]], question_count: int, max_questions: int
+    sheet: dict[str, Any],
+    asked: list[dict[str, str]],
+    question_count: int,
+    max_questions: int,
+    order: tuple[str, ...] = STAGE_ORDER,
 ) -> NextStep:
     """``asked`` is a list of ``{"field_key", "stage"}`` for every question already asked."""
     if question_count >= max_questions:
         return NextStep(done=True, reason="limit")
     asked_keys = {a["field_key"] for a in asked if a.get("stage") != "check"}
     asked_check = {a["field_key"] for a in asked if a.get("stage") == "check"}
-    for stage in STAGE_ORDER:
+    for stage in order:
         for f in ASKED_FIELDS:
             if f.stage != stage:
                 continue

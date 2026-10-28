@@ -58,6 +58,20 @@ async def request_with_retries(
                     status=resp.status_code,
                 )
             last_error = f"HTTP {resp.status_code}"
+            ra = _retry_after_seconds(resp)
+            if resp.status_code == 429 and (ra is None or ra > 3):
+                # Quota exhausted or a long wait: fail fast so the registry can fall back
+                # (and cool this provider down) instead of stalling a live interview.
+                body = resp.text[:400].lower()
+                daily = any(w in body for w in ("daily", "per day", "allocation"))
+                note = " - daily quota used up" if daily else ""
+                raise ProviderError(
+                    f"{provider} rate limited (HTTP 429){note}",
+                    provider=provider,
+                    retryable=True,
+                    status=429,
+                    details={"daily_quota": True} if daily else None,
+                )
         if attempt >= max_retries:
             raise ProviderError(
                 f"{provider} failed after {attempt + 1} attempts ({last_error})",

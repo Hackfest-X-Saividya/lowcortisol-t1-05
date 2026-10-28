@@ -6,6 +6,8 @@ with response validation and the optional response cache.
 from __future__ import annotations
 
 import json
+import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
@@ -46,7 +48,37 @@ class ProviderRegistry:
         self.asrs: dict[str, ASRProvider] = {}
         self.images: dict[str, ImageGenProvider] = {}
         self.inpainters: dict[str, InpaintProvider] = {}
+        self.tts_provider: Any = None
         self._closeables: list[Any] = []
+        self._cooldown: dict[str, float] = {}
+
+    # ---- circuit breaker ------------------------------------------------------------------
+    # A provider that hits a quota limit (429) or keeps failing is skipped for
+    # PROVIDER_COOLDOWN_S seconds, so live requests go straight to the fallback instead of
+    # paying retry/backoff latency on every call.
+
+    def _cooling(self, kind: str, name: str) -> bool:
+        if name == "mock":
+            return False
+        until = self._cooldown.get(f"{kind}:{name}")
+        return until is not None and until > time.monotonic()
+
+    def _trip(self, kind: str, name: str, exc: ProviderError) -> None:
+        if name == "mock":
+            return
+        if exc.status == 429 or exc.retryable:
+            wait = float(self.settings.provider_cooldown_s)
+            if (exc.details or {}).get("daily_quota"):
+                # free daily allowance used up: skip this provider until it resets (UTC midnight)
+                now = datetime.now(UTC)
+                reset = (now + timedelta(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
+                wait = max(wait, (reset - now).total_seconds())
+            self._cooldown[f"{kind}:{name}"] = time.monotonic() + wait
+            log.warning("%s provider %s cooling down for %ss", kind, name, round(wait))
+
+    def status(self) -> dict[str, float]:
+        now = time.monotonic()
+        return {k: round(v - now) for k, v in self._cooldown.items() if v > now}
 
     # ---- LLM -----------------------------------------------------------------------------
 
@@ -60,7 +92,7 @@ class ProviderRegistry:
         errors: list[str] = []
         for name in self.settings.llm_chain:
             provider = self.llms.get(name)
-            if provider is None:
+            if provider is None or self._cooling("llm", name):
                 continue
             use_cache = name != "mock"
             key = cache_key(
@@ -118,6 +150,7 @@ class ProviderRegistry:
                 except ProviderError as exc:
                     errors.append(f"{name}: {exc.message}")
                     log.warning("LLM provider %s failed for task %s; falling back", name, req.task)
+                    self._trip("llm", name, exc)
                     break
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"{name}: {type(exc).__name__}")
@@ -138,7 +171,7 @@ class ProviderRegistry:
         errors: list[str] = []
         for name in self.settings.asr_chain:
             provider = self.asrs.get(name)
-            if provider is None:
+            if provider is None or self._cooling("asr", name):
                 continue
             use_cache = name != "mock"
             key = cache_key(
@@ -182,6 +215,7 @@ class ProviderRegistry:
             except ProviderError as exc:
                 errors.append(f"{name}: {exc.message}")
                 log.warning("ASR provider %s failed; falling back", name)
+                self._trip("asr", name, exc)
         raise ProviderError("All ASR providers failed: " + "; ".join(errors), provider="asr")
 
     # ---- images ---------------------------------------------------------------------------
@@ -190,7 +224,7 @@ class ProviderRegistry:
         errors: list[str] = []
         for name in self.settings.image_chain:
             provider = self.images.get(name)
-            if provider is None:
+            if provider is None or self._cooling("image", name):
                 continue
             use_cache = name != "mock"
             key = cache_key(
@@ -219,6 +253,7 @@ class ProviderRegistry:
             except ProviderError as exc:
                 errors.append(f"{name}: {exc.message}")
                 log.warning("image provider %s failed; falling back", name)
+                self._trip("image", name, exc)
         raise ProviderError("All image providers failed: " + "; ".join(errors), provider="image")
 
     async def inpaint(self, req: InpaintRequest) -> ImageResult:
@@ -237,6 +272,26 @@ class ProviderRegistry:
         raise ProviderError(
             INPAINT_UNAVAILABLE_MSG + " (" + "; ".join(errors) + ")", provider="inpaint"
         )
+
+    async def tts(self, text: str, language: str) -> tuple[bytes, str] | None:
+        """Spoken audio for a short line, or None when no TTS provider is available."""
+        p = self.tts_provider
+        if p is None or self._cooling("tts", p.name):
+            return None
+        key = cache_key(
+            p.name, p.model, {"tts": text, "language": language, "voice": getattr(p, "voice", "")}
+        )
+        cached = await self.cache.get(key)
+        if cached is not None:
+            return cached, "audio/wav"
+        try:
+            audio, mime = await p.synthesize(text, language)
+        except ProviderError as exc:
+            self._trip("tts", p.name, exc)
+            log.warning("TTS failed (%s); the browser will show text only", exc.message)
+            return None
+        await self.cache.put(key, p.name, p.model, audio, mime)
+        return audio, mime
 
     async def aclose(self) -> None:
         for c in self._closeables:
@@ -262,6 +317,10 @@ def build_registry(settings: Settings, files: FileStore, db: Database) -> Provid
             g = GeminiLLM(settings)
             reg.llms["gemini"] = g
             reg._closeables.append(g)
+            if settings.tts_enabled:
+                from app.providers.gemini import GeminiTTS
+
+                reg.tts_provider = GeminiTTS(settings)
         except Exception as exc:  # noqa: BLE001
             log.warning("Gemini client could not be created (%s); skipping", type(exc).__name__)
     if settings.groq_configured:

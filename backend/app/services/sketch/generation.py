@@ -286,8 +286,17 @@ def align(
     src = eye_mouth_points(lm) * [w, h]
     dst = template.targets * size
     M = similarity_transform(src, dst)
+    # Fill anything outside the source frame with the image's own border colour (the
+    # generated backgrounds are plain) instead of replicating edge pixels into streaks.
+    border = np.concatenate([img[0], img[-1], img[:, 0], img[:, -1]]).reshape(-1, img.shape[2])
+    fill = tuple(int(v) for v in np.median(border, axis=0))
     aligned = cv2.warpAffine(
-        img, M, (size, size), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REPLICATE
+        img,
+        M,
+        (size, size),
+        flags=cv2.INTER_LANCZOS4,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=fill,
     )
     new_lm = apply_transform_points(M, lm * [w, h]) / size
     return aligned, new_lm, M

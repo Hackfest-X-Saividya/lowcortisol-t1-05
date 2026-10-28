@@ -847,3 +847,82 @@ def overlay_catalog(container: Container) -> list[dict[str, Any]]:
 def check_edit_permission(actor: Principal) -> None:
     if actor.kind == "user" and actor.role not in ("officer", "artist"):
         raise Forbidden("Only witnesses, officers and artists can edit the sketch")
+
+
+# ---- live (client-drawn) sketch ------------------------------------------------------------
+
+
+async def save_live_sketch(
+    db: AsyncSession,
+    container: Container,
+    actor: Principal,
+    session_id: str,
+    png: bytes,
+    params: dict[str, Any],
+) -> SketchVersion:
+    """Store the pencil sketch drawn live during the voice interview as a sketch version.
+
+    The witness approved exactly this drawing, so it is stored as-is (master = sketch = the
+    uploaded PNG) with the drawing parameters in ``edit`` so it can be redrawn or audited.
+    """
+    from app.services.sketch.landmarks import load_template
+    from app.services.storage import sniff_image
+
+    sess, _ = await case_service.require_open_session(db, actor, session_id)
+    if len(png) > container.settings.max_image_mb * 1024 * 1024:
+        from app.core.errors import PayloadTooLarge
+
+        raise PayloadTooLarge("Sketch image too large")
+    if sniff_image(png) != "image/png":
+        from app.core.errors import UnsupportedMedia
+
+        raise UnsupportedMedia("The live sketch must be a PNG")
+    parent = await repo.latest_version(db, sess.id)
+    rec = await container.files.save(
+        db, png, kind="sketch_image", mime="image/png", session_id=sess.id, created_by=actor.user_id
+    )
+    master = await container.files.save(
+        db, png, kind="master_image", mime="image/png", session_id=sess.id, created_by=actor.user_id
+    )
+    v = SketchVersion(
+        session_id=sess.id,
+        parent_id=parent.id if parent else None,
+        master_file_id=master.id,
+        base_master_file_id=master.id,
+        sketch_file_id=rec.id,
+        mask_file_id=None,
+        landmarks=landmarks_to_json(load_template().landmarks),
+        edit={"type": "live", "params": params},
+        edit_source="voice",
+        utterance_original=None,
+        seed=None,
+        provider_info={"type": "live_sketch", "provider": "browser"},
+        stability={},
+        overlays=[],
+        sliders={},
+        created_by_user_id=actor.user_id,
+        created_by_role=actor.role,
+    )
+    await repo.add_version(db, v)
+    audit.record(
+        db,
+        actor,
+        "version.created",
+        object_type="sketch_version",
+        object_id=v.id,
+        session_id=sess.id,
+        case_id=sess.case_id,
+        details={"parent_id": v.parent_id, "edit_source": "voice", "edit_type": "live"},
+    )
+    await audit.commit_with_audit(db)
+    container.bus.publish(
+        sess.id,
+        "version.created",
+        {
+            "version_id": v.id,
+            "parent_id": v.parent_id,
+            "sketch_file_id": v.sketch_file_id,
+            "edit_source": "voice",
+        },
+    )
+    return v

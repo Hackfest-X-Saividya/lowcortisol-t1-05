@@ -134,7 +134,8 @@ async def test_cloudflare_both_response_formats() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_cloudflare_sends_auth_and_fields() -> None:
-    s = settings_with(**CLOUD_ENV)
+    sdxl = "@cf/stabilityai/stable-diffusion-xl-base-1.0"
+    s = settings_with(**{**CLOUD_ENV, "CF_IMAGE_MODEL": sdxl})
     url = f"https://api.cloudflare.com/client/v4/accounts/acc/ai/run/{s.cf_image_model}"
     route = respx.post(url).mock(
         return_value=httpx.Response(200, content=b"img", headers={"Content-Type": "image/png"})
@@ -160,7 +161,7 @@ async def test_cloudflare_sends_auth_and_fields() -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_gemini_json_mode_and_fallback_to_groq_then_mock(container) -> None:  # type: ignore[no-untyped-def]
-    s = settings_with(**CLOUD_ENV)
+    s = settings_with(**{**CLOUD_ENV, "LLM_PRIMARY": "gemini"})
     reg = build_registry(s, container.files, container.db)
     assert s.llm_chain == ["gemini", "groq", "mock"]
     gem = respx.route(host="generativelanguage.googleapis.com").mock(
@@ -278,3 +279,71 @@ def test_llm_request_payload_shapes() -> None:
     req: LLMRequest = prompts.route_edit("x", "y", "hi", [], ["jaw"], {"jaw": ["jaw_width"]}, [])
     data: dict[str, Any] = json.loads(req.user)
     assert data["utterance_original"] == "x" and req.schema is prompts.EditSpecOut
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_quota_429_trips_breaker_and_skips_provider(container) -> None:  # type: ignore[no-untyped-def]
+    s = settings_with(**{**CLOUD_ENV, "GEMINI_API_KEY": "", "LLM_PRIMARY": "groq"})
+    reg = build_registry(s, container.files, container.db)
+    groq = respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=httpx.Response(429, headers={"Retry-After": "60"})
+    )
+    res = await reg.llm_json(prompts.translate("x", "hi", "en"))
+    assert res.provider == "mock" and groq.call_count == 2  # each Groq model once, no backoff
+    res = await reg.llm_json(prompts.translate("y", "hi", "en"))
+    assert res.provider == "mock" and groq.call_count == 2  # cooling down: not called again
+    assert any(k.startswith("llm:groq") for k in reg.status())
+    await reg.aclose()
+
+
+def test_pcm_to_wav_header() -> None:
+    from app.providers.gemini import pcm_to_wav
+
+    wav = pcm_to_wav(b"\x00\x00" * 100, rate=24000)
+    assert wav[:4] == b"RIFF" and wav[8:12] == b"WAVE" and len(wav) == 44 + 200
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_daily_quota_skips_fallback_model_and_cools_until_reset(container) -> None:  # type: ignore[no-untyped-def]
+    s = settings_with(**CLOUD_ENV)
+    reg = build_registry(s, container.files, container.db)
+    quota = httpx.Response(
+        429, json={"errors": [{"message": "you have used up your daily free allocation"}]}
+    )
+    cf = respx.route(host="api.cloudflare.com").mock(return_value=quota)
+    poll = respx.route(host="image.pollinations.ai").mock(
+        return_value=httpx.Response(200, content=b"PNGpoll", headers={"Content-Type": "image/png"})
+    )
+    res = await reg.generate_image(ImageRequest(prompt="daily", width=64, height=64, seed=1))
+    assert res.provider == "pollinations"
+    assert cf.call_count == 1  # the fallback Workers AI model shares the allowance: not tried
+    assert reg.status()["image:cloudflare"] >= s.provider_cooldown_s - 1
+    await reg.generate_image(ImageRequest(prompt="daily 2", width=64, height=64, seed=1))
+    assert cf.call_count == 1 and poll.call_count == 2
+    await reg.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_groq_rate_limited_model_falls_back_to_second_model() -> None:
+    s = settings_with(**{**CLOUD_ENV, "LLM_PRIMARY": "groq"})
+    seen: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        seen.append(model)
+        if model == s.groq_llm_model:
+            return httpx.Response(429, headers={"Retry-After": "30"})
+        content = json.dumps({"fields": {}, "adjustments": []})
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(side_effect=answer)
+    llm = GroqLLM(s)
+    res = await llm.complete_json(prompts.quick_fields("long nose", {}))
+    assert res.model == s.groq_llm_fallback_model and res.data == {"fields": {}, "adjustments": []}
+    # the limited model is skipped for a while
+    await llm.complete_json(prompts.quick_fields("short hair", {}))
+    assert seen == [s.groq_llm_model, s.groq_llm_fallback_model, s.groq_llm_fallback_model]
+    await llm.aclose()

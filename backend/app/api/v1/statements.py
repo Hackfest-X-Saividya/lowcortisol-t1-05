@@ -6,6 +6,7 @@ from app.api.deps import ContainerDep, DbDep, PrincipalDep
 from app.core.errors import ValidationFailed
 from app.schemas.statements import (
     FeatureSheetOut,
+    QuestionOut,
     StatementAccepted,
     StatementCorrection,
     StatementOut,
@@ -66,6 +67,20 @@ async def create_statement(
             question_id=body.question_id,
         )
     return StatementAccepted(statement_id=st.id, job_id=job.id, status=job.status)
+
+
+@router.get("/sessions/{session_id}/statements", response_model=list[StatementOut])
+async def list_statements(
+    session_id: str, principal: PrincipalDep, db: DbDep
+) -> list[StatementOut]:
+    rows = await statement_service.list_statements(db, principal, session_id)
+    return [StatementOut.model_validate(r) for r in rows]
+
+
+@router.get("/sessions/{session_id}/questions", response_model=list[QuestionOut])
+async def list_questions(session_id: str, principal: PrincipalDep, db: DbDep) -> list[QuestionOut]:
+    rows = await statement_service.list_questions(db, principal, session_id)
+    return [QuestionOut.model_validate(r) for r in rows]
 
 
 @router.get("/sessions/{session_id}/statements/{statement_id}", response_model=StatementOut)

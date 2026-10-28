@@ -1,0 +1,83 @@
+/*
+  NISHAAN design tokens.
+  The whole product is a detective's evidence wall seen head-on: a dark felt wall, manila
+  paper pinned to it, red string between glossy red pins. Six colours only; red is the one
+  accent and every state (selected, active, warning) is expressed with red.
+*/
+:root {
+  /* colour */
+  --wall: #1b2124;
+  --manila: #e4d3a8;
+  --string: #c8321e;
+  --pin: #a63a32;
+  --ink: #14120f;
+  --wall-text: #d8d2c4;
+
+  /* derived (tints of the six colours only) */
+  --ink-soft: rgba(20, 18, 15, 0.62);
+  --ink-faint: rgba(20, 18, 15, 0.14);
+  --wall-text-soft: rgba(216, 210, 196, 0.72);
+  --lamp: rgba(228, 211, 168, 0.075);
+
+  /* type */
+  --font-type: "Special Elite", "Courier Prime", "Courier New", ui-monospace, monospace;
+  --font-hand: "Kalam", "Noto Sans Kannada", "Noto Sans Devanagari", "Segoe Print", cursive;
+  --font-fell: "IM Fell English", "Old Standard TT", Georgia, serif;
+  --font-kn: "Noto Sans Kannada", "Noto Sans", system-ui, sans-serif;
+  --font-hi: "Noto Sans Devanagari", "Noto Sans", system-ui, sans-serif;
+
+  /* size */
+  --string-w: 2px;
+  --pin-size: 12px;
+  --touch: 44px;
+  --radius: 2px;
+  --gap: 16px;
+  --paper-shadow: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.42));
+
+  /* textures (SVG noise, no images) */
+  --felt: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .85 0 0 0 0 .82 0 0 0 0 .77 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .08 0 0 0 0 .07 0 0 0 0 .06 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--wall);
+  color: var(--wall-text);
+  font-family: var(--font-type);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+}
+
+:lang(kn) {
+  font-family: var(--font-kn);
+}
+:lang(hi) {
+  font-family: var(--font-hi);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

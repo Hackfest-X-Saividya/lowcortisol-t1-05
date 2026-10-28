@@ -35,6 +35,7 @@ class SessionDetail(SessionOut):
     latest_scene_version_id: str | None = None
     locks: dict[str, Any] = {}
     question_count: int = 0
+    preferred_language: str = "en"
 
 
 class DisplayEventCreate(BaseModel):

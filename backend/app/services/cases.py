@@ -219,6 +219,31 @@ async def create_session(
     return sess, token
 
 
+async def reissue_witness_token(
+    db: AsyncSession, settings: Settings, actor: Principal, session_id: str
+) -> tuple[InterviewSession, str]:
+    """Issue a fresh witness token (the old one stops working). Assigned staff only."""
+    sess, scope = await load_session(db, actor, session_id)
+    if actor.kind != "user" or actor.role != "officer" or not scope.is_assigned(actor.user_id):
+        raise Forbidden("Only the assigned officer can issue a witness code")
+    if sess.status not in ("active", "paused"):
+        raise Conflict(f"Session is {sess.status}", code="session_not_active")
+    token = new_opaque_token(32)
+    sess.witness_token_hash = token_hash(token)
+    sess.witness_token_expires_at = witness_token_expiry(settings)
+    audit.record(
+        db,
+        actor,
+        "session.witness_token_reissued",
+        object_type="session",
+        object_id=sess.id,
+        session_id=sess.id,
+        case_id=sess.case_id,
+    )
+    await audit.commit_with_audit(db)
+    return sess, token
+
+
 async def load_session(
     db: AsyncSession, actor: Principal, session_id: str, action: Action = Action.VIEW_CASE
 ) -> tuple[InterviewSession, Scope]:
@@ -239,6 +264,7 @@ async def get_session_detail(db: AsyncSession, actor: Principal, session_id: str
     latest_scene = await scene_repo.latest_version(db, sess.id)
     locks = await sketch_repo.get_locks(db, sess.id)
     questions = await statement_repo.list_questions(db, sess.id)
+    witness = await repo.get_witness(db, sess.witness_id)
     audit.record(
         db,
         actor,
@@ -256,6 +282,7 @@ async def get_session_detail(db: AsyncSession, actor: Principal, session_id: str
         "latest_scene_version_id": latest_scene.id if latest_scene else None,
         "locks": {f: {"locked": lk.locked, "confidence": lk.confidence} for f, lk in locks.items()},
         "question_count": len(questions),
+        "preferred_language": witness.preferred_language if witness else "en",
     }
 
 

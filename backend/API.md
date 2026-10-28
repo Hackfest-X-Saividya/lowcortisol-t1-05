@@ -71,6 +71,49 @@ versions, patch the scene, report display events and sign off.
 16. **Audit** `GET /audit?session_id=&case_id=&action=&cursor=&limit=` (officer: own cases, supervisor: jurisdiction);
     `POST /audit/verify` (supervisor, admin).
 
+## Added for the frontend
+
+- `GET /sessions/{id}/statements` and `GET /sessions/{id}/questions`: full lists in time order
+  (witness: own session; staff: case scope). Used by the incident timeline and the session desk.
+- `POST /sessions/{id}/witness-token` (assigned officer, open session): issues a new witness code
+  and invalidates the old one, so the witness window can be reopened later.
+- `GET /sessions/{id}` now also returns `preferred_language` (the witness's language).
+
+## Live voice interview (witness window)
+
+- `GET /sessions/{id}/interview/live` -> `{started, language, question_local, question_en, ask_field, sheet, adjust}`.
+  Before the first answer the question is the free-recall opening.
+- `POST /sessions/{id}/interview/turn` with JSON `{"text", "language", "source": "typed", "dont_remember": false}`
+  or multipart `audio` (+ `language`) for Whisper (what the witness window sends). One call per witness turn (one LLM request):
+  returns `{transcript_original, transcript_english, updated_fields, adjustments, sheet, adjust,
+  reply_local, reply_en, ask_field, done}`. `reply_local` is the artist's next spoken question
+  (direct, open, never multiple choice); `adjust` holds cumulative drawing corrections
+  (`jaw_width`, `nose_length`, ... as fractions of face width); `done` means review mode.
+- `POST /tts {"text", "language"}` -> `audio/wav` (Gemini speech) or `204` when unavailable; the
+  browser uses its own voice first and calls this only when it has none for the language.
+- `POST /sessions/{id}/transcribe` multipart `audio` (+ `language`) -> `{text, provider}`: the words
+  so far while the witness is still talking (Groq Whisper, about 1 s). Not stored; audited as
+  `transcribe.interim`. The final answer is still sent as audio to `/interview/turn`.
+- `POST /sessions/{id}/interview/render` JSON `{"text"?, "commit": false, "wait_s"?}` -> the live
+  forensic pencil sketch as two layers, `{ready, kind, pending, seq, version_id, lines_b64,
+  sketch_b64, provider, preview_fields}` (JPEG base64, 768 px).
+  - `text` = words still being spoken: face details are extracted into a copy of the description
+    (nothing stored) and drawn at once.
+  - `kind = "instant"`: the closest face from the base-face library (gender, age, facial hair)
+    with the spoken corrections applied as smooth warps and spectacles/headwear overlays (about
+    0.2 s, no network).
+  - `kind = "portrait"`: a realistic portrait generated from the whole description (Workers AI,
+    then Pollinations), made in the background, one at a time per session, always for the newest
+    description. `pending = true` means one is on its way.
+  - `commit = true` saves what is shown as a sketch version (`edit.type = "live"`,
+    `edit.render = instant|portrait`, deduplicated); it waits up to `wait_s` (default 30 s) for
+    the portrait first. Audited as `sketch.live_render`.
+  - `{ready: false, reason: "not_enough_detail"}` until a face detail is known.
+- `GET /sessions/{id}/interview/render/latest?after=<seq>` -> the newest finished portrait if its
+  `seq` is newer than `after`, plus `pending` (poll every 1.5 s while `pending`).
+- `POST /sessions/{id}/sketch/live` multipart `image` (PNG) + `params` (JSON): saves an image as a
+  live sketch version (kept for compatibility; the witness window now uses `interview/render`).
+
 ## Edit body
 
 ```json

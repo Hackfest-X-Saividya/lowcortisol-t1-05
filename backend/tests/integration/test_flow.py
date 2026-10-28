@@ -591,3 +591,43 @@ async def test_websocket_receives_events(settings, container, users) -> None:  #
         with pytest.raises(WebSocketDisconnect):
             with tc.websocket_connect(f"/ws/sessions/{sid}?token=bad") as ws:
                 ws.receive_json()
+
+
+@pytest.mark.asyncio
+async def test_lists_and_witness_code_reissue(
+    client: httpx.AsyncClient, users: dict[str, Any]
+) -> None:
+    officer = await login(client, "officer1")
+    ctx = await setup_session(client, officer)
+    sid, wh = ctx["session_id"], ctx["witness_headers"]
+    r = await client.post(
+        f"{API}/sessions/{sid}/statements",
+        json={"text": "He was tall with a long nose.", "language": "en"},
+        headers=wh,
+    )
+    await job(client, r.json()["job_id"], wh)
+    r = await client.get(f"{API}/sessions/{sid}/questions/next", headers=wh)
+    q = r.json()["question"]
+    await client.post(
+        f"{API}/sessions/{sid}/questions/{q['id']}/answer",
+        json={"answer_type": "not_remembered"},
+        headers=wh,
+    )
+    r = await client.get(f"{API}/sessions/{sid}/statements", headers=wh)
+    assert r.status_code == 200 and len(r.json()) == 1
+    assert r.json()[0]["transcript_original"].startswith("He was tall")
+    r = await client.get(f"{API}/sessions/{sid}/questions", headers=officer)
+    assert r.status_code == 200 and r.json()[0]["answer_type"] == "not_remembered"
+    other = await login(client, "officer2")
+    r = await client.get(f"{API}/sessions/{sid}/questions", headers=other)
+    assert r.status_code == 403
+    # reissue: new code works, old one stops; witness and other officers cannot reissue
+    r = await client.post(f"{API}/sessions/{sid}/witness-token", headers=wh)
+    assert r.status_code == 403
+    r = await client.post(f"{API}/sessions/{sid}/witness-token", headers=other)
+    assert r.status_code == 403
+    r = await client.post(f"{API}/sessions/{sid}/witness-token", headers=officer)
+    assert r.status_code == 200
+    new_wh = {"Authorization": f"Bearer {r.json()['witness_token']}"}
+    assert (await client.get(f"{API}/sessions/{sid}", headers=new_wh)).status_code == 200
+    assert (await client.get(f"{API}/sessions/{sid}", headers=wh)).status_code == 401

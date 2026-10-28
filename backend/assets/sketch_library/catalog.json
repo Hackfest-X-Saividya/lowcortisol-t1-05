@@ -1,0 +1,14 @@
+{
+ "sketch_01.jpg": {
+  "description": "man about 25, long narrow face, messy wavy hair, skinny, light stubble",
+  "attributes": {
+   "gender": "male",
+   "age": "young",
+   "face": "long narrow thin",
+   "hair": "wavy messy medium",
+   "facial_hair": "stubble",
+   "build": "thin skinny"
+  },
+  "provider": "cloudflare"
+ }
+}

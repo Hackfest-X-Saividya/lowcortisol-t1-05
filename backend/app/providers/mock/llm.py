@@ -378,6 +378,82 @@ class MockLLM:
 
     # ---- questions -----------------------------------------------------------------------
 
+    def _task_interview_turn(self, p: dict[str, Any]) -> dict[str, Any]:
+        """Offline version of the live interview turn: keyword extraction, keyword edits,
+        and the safe template question for the first field still missing."""
+        from app.services.interview.local_templates import ACK, UPDATED, line, question_for
+
+        words = str(p.get("witness_words", ""))
+        lang = str(p.get("language", "en"))
+        english = self._task_translate({"text": words, "source_lang": lang, "target_lang": "en"})[
+            "translation"
+        ]
+        fields = self._task_extract_feature_sheet(
+            {"statement_english": english, "statement_original": words}
+        )["fields"]
+        low = f" {english.lower()} {words.lower()} "
+        last = p.get("last_question") or {}
+        if last.get("field") and _has_any(
+            low, ("don't remember", "do not remember", "not sure", "ನೆನಪಿಲ್ಲ", "याद नहीं")
+        ):
+            fields[last["field"]] = {
+                "value": "not_remembered",
+                "confidence": "not_remembered",
+                "source_text": words,
+            }
+        adjustments = []
+        if _has_any(
+            low,
+            (
+                "make",
+                "more",
+                "bit",
+                "little",
+                "lot",
+                "change",
+                "karo",
+                "ಮಾಡಿ",
+                "करो",
+                "wider",
+                "narrower",
+                "longer",
+                "shorter",
+                "bigger",
+                "smaller",
+            ),
+        ):
+            for region, triggers, param, direction in PARAM_RULES:
+                region_words = REGION_WORDS.get(region, ())
+                if _has_any(low, region_words) and _has_any(low, triggers):
+                    amt = _amount(low) or 0.05
+                    adjustments.append({"param": param, "amount": amt * direction})
+                    break
+        pending = [f["key"] for f in p.get("next_fields", []) if f.get("key") not in fields]
+        if pending:
+            ask = pending[0]
+            reply_local = f"{line(UPDATED if adjustments else ACK, lang)} {question_for(ask, lang)}"
+            reply_en = f"{line(UPDATED if adjustments else ACK, 'en')} {question_for(ask, 'en')}"
+        else:
+            from app.services.interview.local_templates import REVIEW
+
+            ask = "review"
+            reply_local = line(REVIEW, lang)
+            reply_en = line(REVIEW, "en")
+        return {
+            "english": english,
+            "fields": fields,
+            "adjustments": adjustments,
+            "reply_local": reply_local,
+            "reply_en": reply_en,
+            "ask_field": ask,
+        }
+
+    def _task_quick_fields(self, p: dict[str, Any]) -> dict[str, Any]:
+        turn = self._task_interview_turn(
+            {"witness_words": p.get("witness_words", ""), "language": "en", "next_fields": []}
+        )
+        return {"fields": turn["fields"], "adjustments": turn["adjustments"]}
+
     def _task_phrase_question(self, p: dict[str, Any]) -> dict[str, Any]:
         desc = str(p.get("field_description", "that feature")).lower()
         key = p.get("field_key", "")

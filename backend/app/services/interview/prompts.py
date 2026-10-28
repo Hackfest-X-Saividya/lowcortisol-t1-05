@@ -274,3 +274,128 @@ def scene_command(utterance_original: str, utterance_en: str, scene: dict[str, A
         payload=payload,
         schema=PatchOut,
     )
+
+
+# ---- live interview turn (one call per witness turn) -------------------------------------
+
+SKETCH_PARAMS = (
+    "jaw_width",
+    "face_length",
+    "eye_size",
+    "eye_spacing",
+    "nose_length",
+    "nose_width",
+    "lip_fullness",
+    "brow_height",
+)
+
+
+class Adjustment(BaseModel):
+    param: str
+    amount: float = Field(default=0.05, ge=-0.3, le=0.3)
+
+
+class TurnOut(BaseModel):
+    english: str = ""
+    fields: dict[str, FeatureValue] = Field(default_factory=dict)
+    adjustments: list[Adjustment] = Field(default_factory=list)
+    reply_local: str = ""
+    reply_en: str = ""
+    ask_field: str = ""
+
+
+def interview_turn(
+    utterance: str,
+    language: str,
+    last_question: dict[str, Any] | None,
+    sheet: dict[str, Any],
+    next_fields: list[dict[str, str]],
+    history: list[dict[str, str]],
+) -> LLMRequest:
+    lang_name = _LANG_NAMES.get(language, language)
+    system = (
+        "You are a calm, experienced police sketch artist interviewing a nervous witness, "
+        f"speaking {lang_name}. You draw while you listen. For each witness turn do ALL of:\n"
+        "1. english: translate the witness's words to English faithfully.\n"
+        "2. fields: extract only details the witness actually said, using these keys:\n"
+        + _fields_description()
+        + "\n   value = short English phrase in the witness's sense (e.g. 'long, slightly hooked');"
+        " confidence = high|medium|low|not_remembered; source_text = the witness's own words."
+        " If the witness says they do not remember the field you last asked, set that field to"
+        " value 'not_remembered', confidence 'not_remembered'.\n"
+        "3. adjustments: ONLY if witness_words in THIS turn ask to change the drawing (e.g. 'make the jaw a bit wider',"
+        " 'nose longer', 'eyes closer'), list {param, amount} with param one of "
+        + ", ".join(SKETCH_PARAMS)
+        + "; amount signed: a little=0.05, more=0.10, a lot=0.15 (negative = smaller/narrower/"
+        "shorter/lower/closer).\n"
+        f"4. reply_local: in {lang_name}, a very short neutral acknowledgement (at most five words,"
+        " never repeating feature details back) and then exactly ONE open, non-leading question about"
+        " the FIRST entry in next_fields that your step 2 did not fill. Ask it like a sketch artist:"
+        " direct and simple, e.g. 'What was the nose like?'. Never suggest a value, never ask a yes/no"
+        " question that names a feature, never give options or multiple choice. If next_fields is"
+        " empty, ask whether anything in the sketch looks different from the person.\n"
+        "5. reply_en: the same reply in English. ask_field: the field key you asked about, or 'review'.\n"
+        "Return one JSON object with keys english, fields, adjustments, reply_local, reply_en, ask_field."
+    )
+    known = {
+        k: v.get("value") for k, v in sheet.items() if isinstance(v, dict) and not k.startswith("_")
+    }
+    payload = {
+        "witness_words": utterance,
+        "language": language,
+        "last_question": last_question,
+        "known_so_far": known,
+        "next_fields": next_fields,
+    }
+    return LLMRequest(
+        task="interview_turn",
+        system=system,
+        user=json.dumps(payload, ensure_ascii=False),
+        payload=payload,
+        schema=TurnOut,
+        temperature=0.2,
+    )
+
+
+class QuickFieldsOut(BaseModel):
+    fields: dict[str, FeatureValue] = Field(default_factory=dict)
+    adjustments: list[Adjustment] = Field(default_factory=list)
+
+
+QUICK_FACE_FIELDS = (
+    "gender", "age_range", "build", "skin_tone", "face_shape", "hair", "eyes", "brows", "nose",
+    "mouth", "jaw", "ears", "facial_hair", "headwear", "eyewear", "face_cover", "scars", "moles",
+    "other_marks",
+)  # fmt: skip
+
+
+def quick_fields(witness_words: str, sheet: dict[str, Any]) -> LLMRequest:
+    """Fast extraction from words still being spoken (live sketch preview). Face fields only,
+    and only the ones the words mention, so the answer stays tiny (fast, few tokens)."""
+    keys = "\n".join(f"- {f.key}: {f.description}" for f in FIELDS if f.key in QUICK_FACE_FIELDS)
+    system = (
+        "Extract face details from a witness's words (any language, possibly cut off mid-"
+        "sentence) for a police sketch. Use only what the words say; never guess. Allowed keys:\n"
+        + keys
+        + "\nInclude ONLY keys the words actually mention; leave every other key out. Each value"
+        ' is an object: {"value": short English phrase, "confidence": "high"|"medium"|"low",'
+        ' "source_text": the witness\'s words}. If the words ask to change the drawing, add'
+        " adjustments {param, amount} with param one of "
+        + ", ".join(SKETCH_PARAMS)
+        + " (a little=0.05, more=0.10, a lot=0.15; negative = smaller/narrower/shorter/lower)."
+        ' Example: {"fields": {"nose": {"value": "long", "confidence": "high", "source_text":'
+        ' "a long nose"}}, "adjustments": [{"param": "jaw_width", "amount": 0.05}]}.'
+        ' Nothing about the face -> {"fields": {}, "adjustments": []}. Return JSON only.'
+    )
+    known = {
+        k: v.get("value") for k, v in sheet.items() if isinstance(v, dict) and not k.startswith("_")
+    }
+    payload = {"witness_words": witness_words, "known_so_far": known}
+    return LLMRequest(
+        task="quick_fields",
+        system=system,
+        user=json.dumps(payload, ensure_ascii=False),
+        payload=payload,
+        schema=QuickFieldsOut,
+        temperature=0.1,
+    )

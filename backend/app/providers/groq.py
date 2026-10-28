@@ -9,6 +9,7 @@ Endpoints (OpenAI-compatible, see https://console.groq.com/docs):
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 
@@ -95,10 +96,30 @@ class GroqLLM(GroqClientMixin):
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
         super().__init__(settings, client)
         self.model = settings.groq_llm_model
+        self.models = [m for m in (settings.groq_llm_model, settings.groq_llm_fallback_model) if m]
+        self.reasoning_effort = settings.groq_reasoning_effort
+        self._limited: dict[str, float] = {}  # model -> monotonic time its rate limit clears
 
     async def complete_json(self, req: LLMRequest) -> LLMResult:
+        """Groq rate limits are per model: on a 429 the next model is tried at once, and the
+        limited model is skipped for a minute, so a busy interview never stalls."""
+        now = time.monotonic()
+        ready = [m for m in self.models if self._limited.get(m, 0.0) <= now] or self.models[-1:]
+        last: ProviderError | None = None
+        for model in ready:
+            try:
+                return await self._complete(req, model)
+            except ProviderError as exc:
+                last = exc
+                if exc.status != 429:
+                    raise
+                self._limited[model] = time.monotonic() + 60.0
+        assert last is not None
+        raise last
+
+    async def _complete(self, req: LLMRequest, model: str) -> LLMResult:
         body = {
-            "model": self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": req.system + "\nRespond with a single JSON object."},
                 {"role": "user", "content": req.user},
@@ -106,6 +127,8 @@ class GroqLLM(GroqClientMixin):
             "temperature": req.temperature,
             "response_format": {"type": "json_object"},
         }
+        if "gpt-oss" in model and self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort  # "low" keeps a live turn ~1 s
         resp = await request_with_retries(
             self._client,
             "POST",
@@ -121,4 +144,4 @@ class GroqLLM(GroqClientMixin):
             raise ProviderError(f"Groq LLM returned unexpected payload: {exc}", provider=self.name)
         if not isinstance(data, dict):
             raise ProviderError("Groq LLM returned non-object JSON", provider=self.name)
-        return LLMResult(data=data, provider=self.name, model=self.model, raw_text=content)
+        return LLMResult(data=data, provider=self.name, model=model, raw_text=content)
