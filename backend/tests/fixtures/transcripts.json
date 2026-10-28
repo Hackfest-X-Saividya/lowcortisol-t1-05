@@ -1,0 +1,56 @@
+{
+  "hi": {
+    "free_recall": {
+      "original": "मैं दुकान के काउंटर के पास खड़ा था, शाम के करीब सात बजे थे, रोशनी ठीक थी। वह आदमी करीब तीस साल का था, लंबा और पतला, गेहुंआ रंग। चेहरा लंबा था, बाल छोटे और काले, मोटी भौहें, लंबी नाक, पतले होंठ, चौड़ा जबड़ा। दाढ़ी नहीं थी पर हल्की मूंछ थी। बाएं गाल पर एक निशान था। उसने चश्मा पहना था और नीली शर्ट थी। वह दरवाज़े से आया और काउंटर के सामने खड़ा हो गया।",
+      "english": "I was standing near the shop counter, it was about seven in the evening, the lighting was okay. The man was about thirty years old, tall and thin, wheatish complexion. His face was long, hair short and black, thick eyebrows, long nose, thin lips, wide jaw. No beard but a light moustache. There was a scar on the left cheek. He wore spectacles and a blue shirt. He came in through the door and stood in front of the counter."
+    },
+    "edit_command": {
+      "original": "जबड़ा थोड़ा चौड़ा करो",
+      "english": "make the jaw a bit wider"
+    },
+    "scene_command": {
+      "original": "काउंटर को थोड़ा बाईं तरफ करो",
+      "english": "move the counter a little to the left"
+    },
+    "answer": {
+      "original": "आंखें बड़ी थीं",
+      "english": "the eyes were large"
+    }
+  },
+  "kn": {
+    "free_recall": {
+      "original": "ನಾನು ಅಂಗಡಿಯ ಕೌಂಟರ್ ಬಳಿ ನಿಂತಿದ್ದೆ, ಸಂಜೆ ಸುಮಾರು ಏಳು ಗಂಟೆ, ಬೆಳಕು ಸರಿಯಾಗಿತ್ತು. ಆ ವ್ಯಕ್ತಿ ಸುಮಾರು ಮೂವತ್ತು ವರ್ಷದವನು, ಎತ್ತರ ಮತ್ತು ತೆಳ್ಳಗೆ, ಗೋಧಿ ಬಣ್ಣ. ಮುಖ ಉದ್ದವಾಗಿತ್ತು, ಕೂದಲು ಚಿಕ್ಕದು ಮತ್ತು ಕಪ್ಪು, ದಪ್ಪ ಹುಬ್ಬು, ಉದ್ದ ಮೂಗು, ತೆಳ್ಳನೆಯ ತುಟಿ, ಅಗಲ ದವಡೆ. ಗಡ್ಡ ಇರಲಿಲ್ಲ ಆದರೆ ಸಣ್ಣ ಮೀಸೆ ಇತ್ತು. ಎಡ ಕೆನ್ನೆಯ ಮೇಲೆ ಒಂದು ಕಲೆ ಇತ್ತು. ಕನ್ನಡಕ ಹಾಕಿದ್ದ ಮತ್ತು ನೀಲಿ ಶರ್ಟ್ ಧರಿಸಿದ್ದ. ಬಾಗಿಲಿನಿಂದ ಬಂದು ಕೌಂಟರ್ ಎದುರು ನಿಂತ.",
+      "english": "I was standing near the shop counter, it was about seven in the evening, the lighting was fine. The man was about thirty years old, tall and thin, wheatish complexion. His face was long, hair short and black, thick eyebrows, long nose, thin lips, wide jaw. No beard but a small moustache. There was a scar on the left cheek. He wore spectacles and a blue shirt. He came in through the door and stood in front of the counter."
+    },
+    "edit_command": {
+      "original": "ದವಡೆ ಸ್ವಲ್ಪ ಅಗಲ ಮಾಡಿ",
+      "english": "make the jaw a little wider"
+    },
+    "scene_command": {
+      "original": "ಕೌಂಟರ್ ಅನ್ನು ಸ್ವಲ್ಪ ಎಡಕ್ಕೆ ಸರಿಸಿ",
+      "english": "move the counter a little to the left"
+    },
+    "answer": {
+      "original": "ಕಣ್ಣುಗಳು ದೊಡ್ಡದಾಗಿದ್ದವು",
+      "english": "the eyes were large"
+    }
+  },
+  "en": {
+    "free_recall": {
+      "original": "I was standing near the shop counter, it was about seven in the evening, the lighting was okay. The man was about thirty years old, tall and thin, wheatish complexion. His face was long, hair short and black, thick eyebrows, long nose, thin lips, wide jaw. No beard but a light moustache. There was a scar on the left cheek. He wore spectacles and a blue shirt. He came in through the door and stood in front of the counter.",
+      "english": "I was standing near the shop counter, it was about seven in the evening, the lighting was okay. The man was about thirty years old, tall and thin, wheatish complexion. His face was long, hair short and black, thick eyebrows, long nose, thin lips, wide jaw. No beard but a light moustache. There was a scar on the left cheek. He wore spectacles and a blue shirt. He came in through the door and stood in front of the counter."
+    },
+    "edit_command": {
+      "original": "make the jaw a bit wider",
+      "english": "make the jaw a bit wider"
+    },
+    "scene_command": {
+      "original": "move the counter a little to the left",
+      "english": "move the counter a little to the left"
+    },
+    "answer": {
+      "original": "the eyes were large",
+      "english": "the eyes were large"
+    }
+  }
+}
