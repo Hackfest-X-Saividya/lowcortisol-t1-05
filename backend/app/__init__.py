@@ -1,1 +1,0 @@
-"""Nishaan backend package."""
