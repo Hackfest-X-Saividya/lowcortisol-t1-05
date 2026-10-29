@@ -87,6 +87,8 @@ class InpaintRequest:
     strength: float = 0.9
     width: int = 512
     height: int = 512
+    # reference-image models (FLUX.2): a complete edit instruction used as is
+    instruction: str = ""
 
 
 class LLMProvider(Protocol):
@@ -108,6 +110,27 @@ class ImageGenProvider(Protocol):
     model: str
 
     async def generate(self, req: ImageRequest) -> ImageResult: ...
+
+
+@dataclass
+class VisionRequest:
+    """JSON answer about images (e.g. does a sketch match the description)."""
+
+    task: str
+    system: str
+    user: str
+    images: list[bytes]
+    payload: dict[str, Any]  # structured input (mock providers use it directly)
+    schema: type[BaseModel] | None = None
+    temperature: float = 0.1
+    max_tokens: int = 1200
+
+
+class VisionProvider(Protocol):
+    name: str
+    model: str
+
+    async def vision_json(self, req: VisionRequest) -> LLMResult: ...
 
 
 class InpaintProvider(Protocol):

@@ -19,6 +19,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BACKEND_DIR / ".env"
+# the repository root .env is shared with the 3D face builder; backend/.env (if any) wins
+ROOT_ENV_FILE = BACKEND_DIR.parent.parent / ".env"
+ENV_FILES = tuple(str(p) for p in (ROOT_ENV_FILE, ENV_FILE) if p.exists())
 
 AIMode = Literal["cloud", "mock"]
 LLMName = Literal["gemini", "groq", "mock"]
@@ -27,7 +30,7 @@ ImageName = Literal["cloudflare", "pollinations", "mock"]
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(ENV_FILE) if ENV_FILE.exists() else None,
+        env_file=ENV_FILES or None,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -59,7 +62,7 @@ class Settings(BaseSettings):
     login_max_failures: int = 5
     login_lock_minutes: int = 15
 
-    #Cartoon
+    # Cartoon
     allow_mock_image_fallback: bool = False
 
     # ---- AI providers ---------------------------------------------------------------
@@ -81,6 +84,11 @@ class Settings(BaseSettings):
     groq_llm_model: str = "openai/gpt-oss-120b"
     # separate per-model rate limits: used at once when the main model answers 429
     groq_llm_fallback_model: str = "openai/gpt-oss-20b"
+    # tried after both models above (separate rate limits), so a busy interview never
+    # falls back to the offline mock (comma separated; verified 2026-10-29)
+    groq_llm_backup_models: str = "qwen/qwen3.8-27b"
+    # Image understanding: checks each live sketch against the description
+    groq_vision_model: str = "qwen/qwen3.8-27b"
     groq_reasoning_effort: str = "low"  # low | medium | high (gpt-oss models only)
     # Verify in the Groq console: https://console.groq.com/docs/speech-to-text
     groq_asr_model: str = "whisper-large-v3"
@@ -98,6 +106,12 @@ class Settings(BaseSettings):
     pollinations_model: str = "flux"
     pollinations_timeout_s: float = 45.0
     inpaint_enabled: bool = True
+    # live sketch: pencil = drawn directly as a forensic graphite sketch (what the witness
+    # sees); photo = realistic photo turned into pencil by the sketch filter
+    sketch_style: Literal["pencil", "photo"] = "pencil"
+    # write the image prompt with the LLM and check each new sketch with the vision model
+    sketch_llm_prompt: bool = True
+    sketch_verify: bool = True
     provider_cache: bool = True
     http_timeout_s: float = 60.0
     max_retries: int = 3
@@ -215,6 +229,12 @@ class Settings(BaseSettings):
         )
         chain = [p for p in order if p != "cloudflare" or self.cloudflare_configured]
         return chain + (["mock"] if self.allow_mock_image_fallback else [])
+
+    @property
+    def vision_chain(self) -> list[str]:
+        if self.mock_mode or not self.groq_configured or not self.groq_vision_model:
+            return ["mock"]
+        return ["groq", "mock"]
 
     @property
     def inpaint_chain(self) -> list[str]:

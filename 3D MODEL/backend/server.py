@@ -22,8 +22,10 @@ from google import genai
 from google.genai import types as genai_types
 import speech_recognition as sr
 
-# Load .env from project root
+# Load .env from project root, then from the repository root (shared with the 2D app).
+# Values already set are kept, so a project-level .env wins.
 load_dotenv(Path(__file__).parent.parent / '.env')
+load_dotenv(Path(__file__).parent.parent.parent / '.env')
 
 # Windows consoles and pipes default to cp1252, which can't print the ✓/✗ status marks
 for _stream in (sys.stdout, sys.stderr):
@@ -114,27 +116,55 @@ def _groq_complete(system_prompt, history, user_content, image_payloads, model, 
     else:
         messages.append({"role": "user", "content": user_content})
 
-    # Groq rate limits are per model, so on a 429 fall back to the other models
+    def create(candidate, json_mode):
+        extra = {"response_format": {"type": "json_object"}} if json_mode else {}
+        if 'gpt-oss' in candidate:
+            # Default reasoning can use the whole token budget before any JSON is written,
+            # which Groq reports as json_validate_failed with an empty failed_generation.
+            extra["reasoning_effort"] = "low"
+        response = groq_client.chat.completions.create(
+            model=candidate,
+            messages=messages,
+            max_completion_tokens=max_tokens,
+            **extra,
+        )
+        text = response.choices[0].message.content or ''
+        # Reasoning models can prefix the answer with a <think> block.
+        return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+    # Groq rate limits are per model, so on a 429 fall back to the other models.
+    # A model that fails JSON validation is also skipped for the next one.
     candidates = [model or DEFAULT_GROQ_MODEL] + [m for m in GROQ_FALLBACK_MODELS if m != (model or DEFAULT_GROQ_MODEL)]
     if image_payloads:
         candidates = [m for m in candidates if m in GROQ_VISION_MODELS] or [DEFAULT_GROQ_VISION_MODEL]
-    for i, candidate in enumerate(candidates):
+    last_error = None
+    json_failed = []
+    for candidate in candidates:
         try:
-            response = groq_client.chat.completions.create(
-                model=candidate,
-                messages=messages,
-                max_completion_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-            break
+            return create(candidate, json_mode=True)
         except (RateLimitError, APIStatusError) as e:
             status = getattr(e, 'status_code', None)
-            if status not in (413, 429) or i == len(candidates) - 1:
+            if status in (413, 429):
+                print(f"[AI] Groq model {candidate} rate-limited, trying the next model: {e}")
+            elif status == 400 and 'json_validate_failed' in str(e):
+                print(f"[AI] Groq model {candidate} returned invalid JSON, trying the next model")
+                json_failed.append(candidate)
+            else:
                 raise
-            print(f"[AI] Groq model {candidate} rate-limited, retrying with {candidates[i + 1]}: {e}")
-    text = response.choices[0].message.content or ''
-    # Reasoning models can prefix the answer with a <think> block.
-    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            last_error = e
+
+    # JSON mode failed on every model that answered: ask once more without it and cut
+    # the JSON object out of the reply.
+    for candidate in json_failed:
+        try:
+            text = create(candidate, json_mode=False)
+        except (RateLimitError, APIStatusError) as e:
+            last_error = e
+            continue
+        start, end = text.find('{'), text.rfind('}')
+        if start != -1 and end > start:
+            return text[start:end + 1]
+    raise last_error
 
 
 def _gemini_complete(system_prompt, history, user_content, image_payloads, model):
@@ -168,8 +198,9 @@ Your job is to translate natural language face descriptions into precise paramet
 
 You control these parameter categories:
 
-## PERSON — put these keys INSIDE "morphTargets" and ALWAYS include all seven (they shape the WHOLE face
-## realistically and pick a matching photo skin)
+## PERSON — put these keys INSIDE "morphTargets" (they shape the WHOLE face realistically and pick a
+## matching photo skin). For a NEW face description include all seven. When refining a face that
+## already exists, include only the ones the latest request actually changes.
 age: integer age in YEARS, 18-90 (default 25). Use the midpoint of any stated range ("in his 40s" -> 45, "elderly" -> 75, "teenager" -> 18).
 sex: 0 = female, 100 = male (use 0 or 100 unless the description is ambiguous).
 ancestryAfrican, ancestryAsian, ancestryCaucasian: ancestry MIX weights 0-100 (normalised automatically; default 33/33/33).
@@ -224,6 +255,15 @@ Available styles (pick the closest match to the description):
 Hair properties (0-100): length, density, volume, curl
 Hair color: hex color string (e.g., "#1a1a1a" for black, "#d4a23f" for blonde)
 
+Curly, wavy or frizzy hair: the "curl" number alone does NOT make hair curly, so always pick a
+style whose hair is curly:
+- curly, tightly curled, coily, kinky, afro-textured or frizzy hair (short or medium) -> "hair7"
+- big, voluminous curls of any length -> "hair7"
+- loose curls, wavy or messy curly hair that is short -> "hair5"
+- long curly or long wavy hair that hangs down past the shoulders -> "hair14"
+- curls tied up in two puffs -> "hair8"; braided curls / cornrows -> "hair9"
+Also set curl: 80-100 for curly, 50-70 for wavy, 0 for straight.
+
 ## EYEBROWS — all 0-100
 Properties: thickness, arch, spacing, density
 
@@ -249,7 +289,16 @@ ageRange: "18-25", "25-35", "35-45", "45-55", "55-65", "65+"
 sex: "male" or "female"
 
 ## FACIAL MARKS (scars, birthmarks, moles, pimples, wounds) — OPTIONAL
-Only include if the user explicitly requests mark generation or if reference images show visible marks.
+Include whenever the description mentions a mark on the face, in any words: mole, beauty spot,
+birthmark, birth mark, port-wine stain, patch, scar, cut, stitches, wound, bruise, burn mark,
+pimple, acne, spot, wart. Also include marks clearly visible in reference images.
+- mole / beauty spot / wart -> "mole" (size 0.01-0.02)
+- birthmark / port-wine stain / coloured patch -> "birthmark" (size 0.03-0.08)
+- scar / cut / stitches / burn mark -> "scar" (size 0.02-0.06); wound / bruise -> "wound"
+- pimple / acne -> "pimple" (size 0.01-0.02; several marks for acne)
+- Place it where the description says ("left cheek" -> region "cheek", side "left"; "above the
+  right eyebrow" -> region "brow", side "right", offset_y 0.6; "on the chin" -> region "chin",
+  side "center"). Left and right are the person's own sides. If no place is given, use "cheek".
 - type: "scar", "birthmark", "mole", "pimple", or "wound"
 - region: "cheek", "nose", "chin", "temple", "forehead", "jaw", "mouth", "ear", "eye", "brow", "bridge"
 - side: "left", "right", or "center"
@@ -365,11 +414,18 @@ Tint hints:
 4. Use the exact JSON structure shown below.
 5. For "a bit" / "slightly" changes, adjust by 5-10 from current value. For "more" / "much more", adjust by 15-25.
 6. If one or more reference images are attached, infer visible facial traits from them and combine that with user text instructions.
-7. IMPORTANT: Only include "facialMarks" if the user explicitly requests mark generation (e.g., "add scars", "include visible marks from the image") OR if you're analyzing reference images and marks are prominently visible.
+7. Include "facialMarks" whenever the description or request mentions a mark (see FACIAL MARKS), or when reference images show visible marks. When refining, list ONLY the new marks the latest request asks for: marks already on the face stay automatically, never repeat them.
 8. Only include "glasses" if the description mentions glasses, spectacles, eyewear, sunglasses, or similar. If the user says "remove glasses", set enabled: false.
 9. The same applies to "faceMask", "earrings" and "bandana": include each block ONLY when the description mentions that item, and set enabled: false when the user asks to remove it. Omit the block entirely otherwise.
 10. A bandana and a face mask both cover the lower face, so never enable both at once. Pick whichever the description actually calls for.
 11. Accessories are worn items, not facial features. Never invent them — a face described without eyewear or jewellery should return none of these blocks.
+12. NEVER change anything the request does not ask for. When a current face state is given, output
+    ONLY the keys the latest request changes and leave every other block and key out: do not
+    repeat hair, eyebrows, beard, appearance, eye colour or the person keys, and do not "tidy up"
+    other sliders. A key you leave out keeps its current value.
+13. For a new description set only what it states or clearly implies. Leave undescribed features out
+    (they stay natural), and never set eyeColor, lipColor or skinColor unless they are described.
+14. The OUTPUT FORMAT below lists every possible block; include only the blocks you need.
 
 ## OUTPUT FORMAT (strict JSON, nothing else):
 {
@@ -1025,6 +1081,9 @@ def ai_generate_face():
             ai_text = '\n'.join(json_lines)
 
         face_params = json.loads(ai_text)
+        # images (or the "marks from image" option) can justify any change: keep the full answer
+        if not image_payloads and not generate_facial_marks:
+            _drop_unrequested(face_params, prompt, refining=bool(conversation_history))
         _fill_person_params(face_params)
 
         return jsonify({
@@ -1032,6 +1091,8 @@ def ai_generate_face():
             "params": face_params,
             "aiResponse": ai_text,
             "provider": provider,
+            # the request asked for marks: add them even when the face already has some
+            "marksRequested": bool(generate_facial_marks or 'marks' in _mentioned(prompt)),
         })
 
     except json.JSONDecodeError as e:
@@ -1186,6 +1247,108 @@ def _compact_state(state):
     if isinstance(morphs, dict):
         state['morphTargets'] = {k: v for k, v in morphs.items() if v != _PERSON_DEFAULTS.get(k, 50)}
     return json.dumps(state, separators=(',', ':'))
+
+
+# Words that show the request is about a feature. On a refinement, parts of the AI answer the
+# request does not mention are dropped, so a request like "add a mole" cannot also change the
+# age, hair or eye colour. A vague request that names no feature at all is applied as is.
+_W = r'(?<![a-z])(?:{})(?![a-z])'.format
+_FEATURE_WORDS = {
+    'age': _W(r'age[ds]?|old(?:er)?|young(?:er)?|teen(?:age|ager)?s?|elderly|senior|years?|yrs?|'
+              r'\d{1,2}s?|twenties|thirties|forties|fifties|sixties|seventies|eighties|middle[- ]aged|kid'),
+    'sex': _W(r'man|men|woman|women|male|female|boy|girl|guy|lady|gentleman|masculine|feminine|sex|gender'),
+    'ancestry': _W(r'indian|south asian|asian|african|black|white|european|caucasian|chinese|japanese|korean|'
+                   r'arab|middle eastern|hispanic|latino|latina|filipino|thai|vietnamese|pakistani|'
+                   r'bangladeshi|mixed|ethnic\w*|race|ancestry|origin|descent'),
+    'bodyWeight': _W(r'fat|fatter|thin|thinner|slim|slimmer|heavy|heavier|weight|chubby|obese|skinny|plump|'
+                     r'overweight|underweight|gaunt|lean|stout|bulky|fleshy|full[- ]faced'),
+    'muscle': _W(r'muscle|muscular|athletic|built|strong|frail|bodybuilder|fit|brawny|weak'),
+    'face': _W(r'face|faced|head|skull|round|oval|square|heart|v-shaped?|wide|narrow|broad|long|short|'
+               r'jowls?|proportions?'),
+    'forehead': _W(r'forehead|temples?|brow ridge|hairline'),
+    'brow': _W(r'brows?|eyebrows?|unibrow'),
+    'eye': _W(r'eyes?|eyelids?|monolid|lids|eye bags|bags|hooded|squint\w*|almond'),
+    'nose': _W(r'nose|nostrils?|bridge|hooked|aquiline|snub|button nose|roman'),
+    'cheek': _W(r'cheeks?|cheekbones?|nasolabial|smile lines?|dimples?|hollow'),
+    'mouth': _W(r'mouth|lips?|smile|philtrum|cupid'),
+    'jaw': _W(r'jaw|jawline|chin|chins|jowls?'),
+    'ear': _W(r'ears?|earlobes?'),
+    'hair': _W(r'hair|haired|hairstyle|haircut|bald|balding|shaved head|curl\w*|wavy|frizzy|straight|'
+               r'fringe|bangs|ponytail|braids?|braided|cornrows?|afro|buzz|crew cut|crop|bun|'
+               r'receding|blonde?|brunette|ginger|redhead|grey|gray|silver|dreadlocks?'),
+    'beard': _W(r'beard|bearded|moustache|mustache|stubble|goatee|shaved|shaven|clean[- ]shaven|'
+                r'facial hair|whiskers?|sideburns?'),
+    'eyeColor': _W(r'eye colou?r|(?:blue|green|brown|hazel|grey|gray|black|amber)[- ]eyed|'
+                   r'(?:blue|green|brown|hazel|grey|gray|black|amber|dark|light) eyes'),
+    'lipColor': _W(r'lipstick|lip colou?r|(?:red|pink|dark|pale|nude|purple) lips'),
+    'skinColor': _W(r'skin|complexion|tan|tanned|pale|fair|dark[- ]skinned|dusky|wheatish|sunburnt'),
+    'marks': _W(r'moles?|birth ?marks?|beauty spots?|port[- ]wine|scars?|scarred|cuts?|stitch\w*|wounds?|'
+                r'bruis\w*|burns?|pimples?|acne|spots?|warts?|marks?|blemish\w*|freckles?'),
+    'glasses': _W(r'glass(?:es)?|spectacles?|specs|eyewear|sunglass(?:es)?|shades|lenses|frames?'),
+    'faceMask': _W(r'mask|masked|covering|covered'),
+    'earrings': _W(r'earrings?|ear ?rings?|studs?|hoops?|piercings?|pierced'),
+    'bandana': _W(r'bandanas?|kerchief|handkerchief|scarf|cloth'),
+}
+_MORPH_GROUPS = (
+    (('faceWidth', 'faceLength', 'headWidth', 'headLength', 'faceTaper'), 'face'),
+    (('forehead', 'temple'), 'forehead'),
+    (('brow',), 'brow'),
+    (('eye', 'epicanthic'), 'eye'),
+    (('nose', 'nostril'), 'nose'),
+    (('cheek', 'nasolabial'), 'cheek'),
+    (('mouth', 'lip', 'upperLip', 'lowerLip', 'cupid', 'philtrum'), 'mouth'),
+    (('jaw', 'chin', 'doubleChin'), 'jaw'),
+    (('ear',), 'ear'),
+)
+_PERSON_KEYS = {'age': 'age', 'sex': 'sex', 'ancestryAfrican': 'ancestry', 'ancestryAsian': 'ancestry',
+                'ancestryCaucasian': 'ancestry', 'bodyWeight': 'bodyWeight', 'muscle': 'muscle'}
+
+
+def _mentioned(prompt):
+    text = (prompt or '').lower()
+    return {name for name, pattern in _FEATURE_WORDS.items() if re.search(pattern, text)}
+
+
+def _morph_group(key):
+    for prefixes, group in _MORPH_GROUPS:
+        if key.startswith(prefixes):
+            return group
+    return None
+
+
+def _drop_unrequested(face_params, prompt, refining):
+    """Keep only the parts of the AI answer the request is about (see _FEATURE_WORDS).
+
+    New faces keep everything except marks nobody described. Refinements also drop person
+    keys, sliders and blocks for features the request does not mention. A request that names
+    no feature at all ("try again", "more realistic") is applied unchanged."""
+    if not isinstance(face_params, dict):
+        return face_params
+    said = _mentioned(prompt)
+    if 'marks' not in said:
+        face_params.pop('facialMarks', None)
+    if not refining or not said:
+        return face_params
+    morphs = face_params.get('morphTargets')
+    if isinstance(morphs, dict):
+        for key in list(morphs):
+            group = _PERSON_KEYS.get(key) or _morph_group(key)
+            if group == 'face' and said & {'bodyWeight', 'muscle'}:
+                continue  # "fatter" also widens the face
+            if group is not None and group not in said:
+                morphs.pop(key)
+    blocks = {'hair': 'hair', 'eyebrows': 'brow', 'beard': 'beard', 'glasses': 'glasses',
+              'faceMask': 'faceMask', 'earrings': 'earrings', 'bandana': 'bandana'}
+    for block, group in blocks.items():
+        if block in face_params and group not in said:
+            face_params.pop(block)
+    appearance = face_params.get('appearance')
+    if isinstance(appearance, dict):
+        for key, group in (('eyeColor', 'eyeColor'), ('lipColor', 'lipColor'),
+                           ('skinColor', 'skinColor'), ('ageRange', 'age'), ('sex', 'sex')):
+            if key in appearance and group not in said:
+                appearance.pop(key)
+    return face_params
 
 
 def _fill_person_params(face_params):

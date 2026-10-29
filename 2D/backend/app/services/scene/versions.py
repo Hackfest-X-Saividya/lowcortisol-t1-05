@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +129,12 @@ async def build_scene_job(ctx: JobContext, db: AsyncSession) -> dict[str, Any]:
     res = await container.providers.llm_json(
         prompts.build_scene(description_en, description_orig, tpl, scene_fields)
     )
-    scene = builder.normalize(res.data.get("scene") or {})
+    built = dict(res.data.get("scene") or {})
+    # a floor-plan template keeps its walls, doors and windows even if the model left them out
+    plan_room = (templates.get(str(built.get("template"))) or {}).get("room") or {}
+    if plan_room.get("walls") and not (built.get("room") or {}).get("walls"):
+        built["room"] = copy.deepcopy(plan_room)
+    scene = builder.normalize(built)
     v = await _create_version(
         db,
         container,

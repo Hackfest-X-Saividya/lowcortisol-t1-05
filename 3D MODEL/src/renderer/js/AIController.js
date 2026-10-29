@@ -227,7 +227,7 @@ class AIController {
         this.caseManager.pushState('AI face generation');
 
         // Apply the parameters
-        const changes = this._applyParams(data.params);
+        const changes = this._applyParams(data.params, { marksRequested: !!data.marksRequested });
 
         // Update conversation history for refinement (text only — strip images to save tokens)
         this.conversationHistory.push(
@@ -270,7 +270,7 @@ class AIController {
    * Apply AI-returned parameters to the face.
    * Returns an object summarizing what changed.
    */
-  _applyParams(params) {
+  _applyParams(params, { marksRequested = false } = {}) {
     const changes = {
       morphs: 0, hair: false, eyebrows: false, beard: false,
       appearance: false, marks: false,
@@ -374,7 +374,7 @@ class AIController {
       // Only report marks as changed if they actually were — under 'preserve'
       // the AI's marks are dropped, and the chat summary should not claim
       // otherwise.
-      changes.marks = this._applyFacialMarks(params.facialMarks);
+      changes.marks = this._applyFacialMarks(params.facialMarks, marksRequested);
     }
 
     // Apply accessories. Each system validates its own payload in
@@ -418,7 +418,7 @@ class AIController {
   /**
    * Apply facial marks from AI-generated data to the face.
    */
-  _applyFacialMarks(aiMarks) {
+  _applyFacialMarks(aiMarks, requested = false) {
     if (!Array.isArray(aiMarks) || aiMarks.length === 0) return false;
 
     const existingCount = typeof this.skinMarkSystem.getMarkCount === 'function'
@@ -430,7 +430,9 @@ class AIController {
     if (this.markHandlingMode === 'replace') {
       // AI wins: wipe the existing set first.
       this.skinMarkSystem.clearAll();
-    } else if (this.markHandlingMode === 'preserve' && existingCount > 0) {
+    } else if (this.markHandlingMode === 'preserve' && existingCount > 0 && !requested) {
+      // (A mark the request itself asks for, e.g. "add a mole on his chin", is always added:
+      // the operator's existing marks still stay.)
       // Operator wins: their marks stand and the AI's are dropped.
       //
       // Gated on there being something to preserve. 'preserve' is the default,

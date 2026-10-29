@@ -81,8 +81,43 @@ def segment_hits_box(
     return True
 
 
+def _inside_polygon(poly: list[list[float]], x: float, z: float) -> bool:
+    inside = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, zi = poly[i]
+        xj, zj = poly[j]
+        if (zi > z) != (zj > z) and x < (xj - xi) * (z - zi) / (zj - zi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
 def _inside_room(scene: Scene, x: float, z: float) -> bool:
+    if len(scene.room.outline) >= 3:
+        return _inside_polygon(scene.room.outline, x, z)
     return 0.0 <= x <= scene.room.width_m and 0.0 <= z <= scene.room.depth_m
+
+
+def _wall_blocking(scene: Scene, p0: tuple[float, float], p1: tuple[float, float]) -> str | None:
+    """Id of the first plan wall the floor segment p0->p1 crosses outside a door or window."""
+    rx, rz = p1[0] - p0[0], p1[1] - p0[1]
+    for w in scene.room.walls:
+        (ax, az), (bx, bz) = w.a, w.b
+        sx, sz = bx - ax, bz - az
+        denom = rx * sz - rz * sx
+        if abs(denom) < 1e-9:
+            continue  # parallel
+        qx, qz = ax - p0[0], az - p0[1]
+        t = (qx * sz - qz * sx) / denom  # along the sight line
+        u = (qx * rz - qz * rx) / denom  # along the wall
+        if not (0.0 <= t <= 1.0 and 0.0 <= u <= 1.0):
+            continue
+        along = u * math.hypot(sx, sz)
+        if any(op.offset_m <= along <= op.offset_m + op.width_m for op in w.openings):
+            continue  # seen through a doorway or a window
+        return w.id
+    return None
 
 
 def analyse(scene: Scene) -> dict[str, Any]:
@@ -103,6 +138,9 @@ def analyse(scene: Scene) -> dict[str, Any]:
         scene, suspect.pos[0], suspect.pos[2]
     ):
         return {"distance_m": distance, "line_of_sight": "blocked", "blocking_object_id": "wall"}
+    wall = _wall_blocking(scene, (eye[0], eye[2]), (head[0], head[2]))
+    if wall is not None:
+        return {"distance_m": distance, "line_of_sight": "blocked", "blocking_object_id": wall}
     for o in scene.objects:
         if o.type == "road":
             continue

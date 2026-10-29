@@ -429,3 +429,193 @@
     justify-self: start;
   }
 }
+
+/* ---- sign-in and case files: the clean wall ------------------------------------------------ */
+.login {
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+/* the submit buttons: a manila strip with a red outline; disabled = faded with a dashed outline */
+.login-card .ink-btn[type="submit"],
+.new-case-card .ink-btn[type="submit"] {
+  min-height: var(--touch);
+  background: var(--manila);
+  color: var(--ink);
+  border: 2px solid var(--string);
+  border-radius: var(--radius);
+}
+.login-card .ink-btn[type="submit"] .ink,
+.new-case-card .ink-btn[type="submit"] .ink {
+  text-shadow:
+    0 0 0.6px rgba(20, 18, 15, 0.55),
+    0.4px 0.3px 0 rgba(20, 18, 15, 0.18);
+}
+.login-card .ink-btn[type="submit"]:hover:not(:disabled),
+.new-case-card .ink-btn[type="submit"]:hover:not(:disabled) {
+  background: rgba(200, 50, 30, 0.08);
+}
+.login-card .ink-btn[type="submit"]:disabled,
+.new-case-card .ink-btn[type="submit"]:disabled {
+  opacity: 0.5;
+  border-style: dashed;
+  cursor: default;
+}
+
+/* a visible red focus ring on every field and button */
+.login .field input:focus-visible,
+.cases-page .field input:focus-visible,
+.login .ink-btn:focus-visible,
+.cases-page .ink-btn:focus-visible,
+.cases-page .strip-link:focus-visible,
+.cases-page .s-brand-link:focus-visible,
+.login .login-brand:focus-visible {
+  outline: 2px solid var(--string);
+  outline-offset: 3px;
+}
+
+/* date and time: ink hairline, manila fill, typewriter text, ink calendar mark */
+.new-case-card input[type="datetime-local"] {
+  background: var(--manila);
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  font-family: var(--font-type);
+  color-scheme: light;
+}
+.new-case-card input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: brightness(0);
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+/* the top bar: the stamp and sign-out hang from pins too */
+.s-stamp-wrap,
+.s-signout {
+  position: relative;
+  display: inline-flex;
+  justify-self: center;
+}
+
+/* case files */
+.cases-page .case-no {
+  font-family: var(--font-mono);
+  font-size: 0.98rem;
+  letter-spacing: 0.04em;
+}
+.cases-page .cases-files > .error-note {
+  color: var(--wall-text);
+}
+.cases-page .strip-list {
+  gap: 14px;
+}
+.cases-page .case-strip {
+  max-width: 100%;
+}
+.cases-scroll-frame {
+  position: relative;
+}
+.list-top-pin {
+  top: 0;
+}
+.cases-scroll {
+  padding: 18px 8px 12px 0;
+}
+.cases-scroll > .ink-btn {
+  margin-top: 16px;
+}
+.new-case-card > .paper-body {
+  padding: 26px 26px 22px;
+}
+.new-case-card .ink-btn[type="submit"] {
+  width: 100%;
+}
+
+/* desktop: the list in a narrow column on the left, the form in the middle, no page scroll */
+@media (min-width: 1100px) and (min-height: 640px) {
+  .cases-page {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    padding-bottom: 34px;
+  }
+  .cases-page .s-main {
+    position: relative;
+    max-width: none;
+    margin: 0;
+    min-height: 0;
+  }
+  .cases-layout {
+    position: absolute;
+    inset: 0;
+  }
+  .cases-files {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: clamp(280px, 22vw, 330px);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .cases-files > .section-strip {
+    align-self: flex-start;
+  }
+  .cases-scroll-frame {
+    flex: 1;
+    min-height: 0;
+  }
+  .cases-scroll {
+    position: absolute;
+    inset: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(216, 210, 196, 0.35) transparent;
+  }
+  .cases-new {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: clamp(400px, 32vw, 460px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* narrower or short screens: one centred column, the form first */
+@media (max-width: 1099px), (max-height: 639px) {
+  .cases-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 34px;
+  }
+  .cases-new {
+    order: -1;
+    width: min(460px, 100%);
+  }
+  .cases-files {
+    width: min(460px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+}
+
+/* phones: 16px safe margin, no sideways scroll */
+@media (max-width: 767px) {
+  .login.staff,
+  .cases-page.staff {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .cases-page .s-top {
+    gap: 16px;
+  }
+  .new-case-card > .paper-body,
+  .login-card > .paper-body {
+    padding: 22px 18px 18px;
+  }
+}

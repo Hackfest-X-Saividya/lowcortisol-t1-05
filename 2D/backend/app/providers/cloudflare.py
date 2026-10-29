@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import base64
 
+import cv2
 import httpx
+import numpy as np
 
 from app.config import Settings
 from app.core.errors import ProviderError
@@ -75,6 +77,18 @@ def _form(fields: dict[str, object], image_png: bytes | None = None) -> dict[str
     return files
 
 
+def _reference(png: bytes, side: int = 512) -> bytes:
+    """Workers AI takes FLUX.2 reference images up to 512x512: shrink larger ones."""
+    img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    if img is None or max(img.shape[:2]) <= side:
+        return png
+    h, w = img.shape[:2]
+    scale = side / max(h, w)
+    small = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".png", small)
+    return buf.tobytes() if ok else png
+
+
 def _clamp_side(px: int) -> int:
     return max(256, min(1920, int(px)))
 
@@ -126,6 +140,8 @@ class CloudflareImageGen(CloudflareBase):
                                 "prompt": req.prompt,
                                 "width": _clamp_side(req.width),
                                 "height": _clamp_side(req.height),
+                                # same seed -> the same face for the same description
+                                **({"seed": int(req.seed)} if req.seed is not None else {}),
                             }
                         )
                     }
@@ -161,7 +177,7 @@ class CloudflareInpainter(CloudflareBase):
             # Reference-image edit: FLUX.2 keeps the person's identity from ``input_image_0``.
             # It has no mask input; the caller composites the result back through its mask,
             # so only the masked region of the new image is ever used.
-            instruction = (
+            instruction = req.instruction or (
                 "Edit the reference photo of a person. Target appearance: "
                 f"{req.prompt}. Keep the same person, face identity, pose, camera framing, "
                 "lighting and background exactly as in the reference. Change only what is "
@@ -178,8 +194,9 @@ class CloudflareInpainter(CloudflareBase):
                         "prompt": instruction,
                         "width": _clamp_side(req.width),
                         "height": _clamp_side(req.height),
+                        **({"seed": int(req.seed)} if req.seed is not None else {}),
                     },
-                    req.image_png,
+                    _reference(req.image_png),
                 ),
             )
             png = _decode_image_response(resp, self.name)

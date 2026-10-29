@@ -27,9 +27,11 @@ from app.providers.base import (
     LLMRequest,
     LLMResult,
     Transcript,
+    VisionProvider,
+    VisionRequest,
 )
 from app.providers.cache import ProviderCacheStore, cache_key
-from app.providers.mock import MockASR, MockImageGen, MockInpainter, MockLLM
+from app.providers.mock import MockASR, MockImageGen, MockInpainter, MockLLM, MockVision
 from app.services.storage import FileStore
 
 log = get_logger(__name__)
@@ -48,6 +50,7 @@ class ProviderRegistry:
         self.asrs: dict[str, ASRProvider] = {}
         self.images: dict[str, ImageGenProvider] = {}
         self.inpainters: dict[str, InpaintProvider] = {}
+        self.visions: dict[str, VisionProvider] = {}
         self.tts_provider: Any = None
         self._closeables: list[Any] = []
         self._cooldown: dict[str, float] = {}
@@ -75,6 +78,15 @@ class ProviderRegistry:
                 wait = max(wait, (reset - now).total_seconds())
             self._cooldown[f"{kind}:{name}"] = time.monotonic() + wait
             log.warning("%s provider %s cooling down for %ss", kind, name, round(wait))
+
+    def ready(self, kind: str, name: str) -> bool:
+        """True when that provider is configured and not cooling down after a quota error."""
+        pool: dict[str, dict[str, Any]] = {
+            "image": dict(self.images),
+            "inpaint": dict(self.inpainters),
+            "vision": dict(self.visions),
+        }
+        return name in pool.get(kind, {}) and not self._cooling(kind, name)
 
     def status(self) -> dict[str, float]:
         now = time.monotonic()
@@ -256,6 +268,34 @@ class ProviderRegistry:
                 self._trip("image", name, exc)
         raise ProviderError("All image providers failed: " + "; ".join(errors), provider="image")
 
+    # ---- vision ---------------------------------------------------------------------------
+
+    async def vision_json(self, req: VisionRequest) -> LLMResult:
+        """JSON answer about images, validated against ``req.schema`` (one retry)."""
+        errors: list[str] = []
+        for name in self.settings.vision_chain:
+            provider = self.visions.get(name)
+            if provider is None or self._cooling("vision", name):
+                continue
+            for attempt in range(2):
+                try:
+                    result = await provider.vision_json(req)
+                    if req.schema is not None:
+                        result.data = req.schema.model_validate(result.data).model_dump()
+                    return result
+                except ValidationError as exc:
+                    errors.append(f"{name}: invalid response ({exc.error_count()} errors)")
+                    if attempt == 0:
+                        continue
+                except ProviderError as exc:
+                    errors.append(f"{name}: {exc.message}")
+                    log.warning("vision provider %s failed for %s; falling back", name, req.task)
+                    self._trip("vision", name, exc)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{name}: {type(exc).__name__}")
+                break
+        raise ProviderError("All vision providers failed: " + "; ".join(errors), provider="vision")
+
     async def inpaint(self, req: InpaintRequest) -> ImageResult:
         chain = self.settings.inpaint_chain
         if not chain:
@@ -308,6 +348,7 @@ def build_registry(settings: Settings, files: FileStore, db: Database) -> Provid
     reg.asrs["mock"] = MockASR()
     reg.images["mock"] = MockImageGen()
     reg.inpainters["mock"] = MockInpainter()
+    reg.visions["mock"] = MockVision()
     if settings.mock_mode or not settings.cloud_mode_ack:
         return reg
     if settings.gemini_configured:
@@ -329,6 +370,11 @@ def build_registry(settings: Settings, files: FileStore, db: Database) -> Provid
         reg.asrs["groq"] = GroqASR(settings)
         reg.llms["groq"] = GroqLLM(settings)
         reg._closeables += [reg.asrs["groq"], reg.llms["groq"]]
+        if settings.groq_vision_model:
+            from app.providers.groq import GroqVision
+
+            reg.visions["groq"] = GroqVision(settings)
+            reg._closeables.append(reg.visions["groq"])
     if settings.cloudflare_configured:
         from app.providers.cloudflare import CloudflareImageGen, CloudflareInpainter
 

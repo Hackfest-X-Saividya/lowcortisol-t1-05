@@ -1,6 +1,8 @@
-// Top-down crime-scene layout drawn as paper cut-outs on a sheet. Objects and people can be
+// Top-down crime-scene layout drawn as paper cut-outs on a sheet: a single room or a multi-room
+// floor plan (walls, door swings, windows; see scenePlan.js). Objects and people can be
 // dragged (when `editable`); dropping calls onMove(collection, index, [x, 0, z]).
 import { useRef, useState } from "react";
+import { planOutline, planWalls, solidRuns, wallFrame, wallOpenings } from "./scenePlan.js";
 
 const INK = "#14120F";
 const RED = "#C8321E";
@@ -42,13 +44,6 @@ export default function SceneMap({ scene, editable = false, onMove, labelFor, pe
   };
   const posOf = (coll, i, item) => (drag && drag.coll === coll && drag.index === i ? [drag.x, drag.z] : [item.pos[0], item.pos[2]]);
 
-  const wallSeg = (wall, offset, width) => {
-    if (wall === "north") return [offset, 0, offset + width, 0];
-    if (wall === "south") return [offset, D, offset + width, D];
-    if (wall === "west") return [0, offset, 0, offset + width];
-    return [W, offset, W, offset + width];
-  };
-
   const witness = scene.people?.find((p) => p.role === "witness");
   const suspect = scene.people?.find((p) => p.role === "suspect");
 
@@ -70,14 +65,57 @@ export default function SceneMap({ scene, editable = false, onMove, labelFor, pe
       {Array.from({ length: Math.floor(D) + 1 }, (_, i) => (
         <line key={`gz${i}`} x1={0} y1={i} x2={W} y2={i} stroke={INK} strokeOpacity=".08" strokeWidth={unit * 0.15} />
       ))}
-      <rect x="0" y="0" width={W} height={D} fill="none" stroke={INK} strokeWidth={unit * 0.6} />
-      {(scene.room.doors || []).map((d) => {
-        const [x1, y1, x2, y2] = wallSeg(d.wall, d.offset_m, d.width_m);
-        return <line key={d.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#E4D3A8" strokeWidth={unit * 1.4} />;
-      })}
-      {(scene.room.windows || []).map((w) => {
-        const [x1, y1, x2, y2] = wallSeg(w.wall, w.offset_m, w.width_m);
-        return <line key={w.id} x1={x1} y1={y1} x2={x2} y2={y2} stroke={INK} strokeWidth={unit * 0.25} strokeDasharray={`${unit} ${unit * 0.6}`} />;
+      <polygon points={planOutline(scene.room).map((p) => p.join(",")).join(" ")} fill={INK} fillOpacity=".03" />
+      {(scene.room.areas || []).map((a) => (
+        <text
+          key={a.id}
+          x={(a.rect[0] + a.rect[2]) / 2}
+          y={(a.rect[1] + a.rect[3]) / 2}
+          textAnchor="middle"
+          fontSize={unit * 1.3}
+          fill={INK}
+          fillOpacity=".4"
+          className="scene-label"
+        >
+          {a.name}
+        </text>
+      ))}
+      {planWalls(scene.room).map((wall) => {
+        const { len, ux, uz } = wallFrame(wall);
+        const ops = wallOpenings(wall);
+        const at = (s, n = 0) => [wall.a[0] + ux * s - uz * n, wall.a[1] + uz * s + ux * n];
+        const sw = unit * (wall.exterior === false ? 0.35 : 0.6);
+        return (
+          <g key={wall.id}>
+            {solidRuns(len, ops, sw / 2).map(([s0, s1]) => {
+              const [x1, y1] = at(s0);
+              const [x2, y2] = at(s1);
+              return <line key={s0} x1={x1} y1={y1} x2={x2} y2={y2} stroke={INK} strokeWidth={sw} />;
+            })}
+            {ops.map((op) => {
+              if (op.kind === "window") {
+                const g = sw * 0.35;
+                return [-g, g].map((n) => {
+                  const [x1, y1] = at(op.o, n);
+                  const [x2, y2] = at(op.o + op.w, n);
+                  return <line key={`${op.id}${n}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={INK} strokeWidth={unit * 0.12} />;
+                });
+              }
+              // door: leaf standing open plus the swing arc, as drawn on a plan
+              const h = op.dir > 0 ? op.o : op.o + op.w;
+              const [hx, hy] = at(h);
+              const [lx, ly] = at(h, op.side * op.w);
+              const [cx, cy] = at(h + op.dir * op.w);
+              const sweep = op.dir * op.side > 0 ? 1 : 0;
+              return (
+                <g key={op.id} stroke={INK} fill="none">
+                  <line x1={hx} y1={hy} x2={lx} y2={ly} strokeWidth={unit * 0.2} />
+                  <path d={`M${cx} ${cy} A${op.w} ${op.w} 0 0 ${sweep} ${lx} ${ly}`} strokeWidth={unit * 0.1} strokeOpacity=".6" />
+                </g>
+              );
+            })}
+          </g>
+        );
       })}
 
       {/* sight line (staff only: shows the analysis) */}

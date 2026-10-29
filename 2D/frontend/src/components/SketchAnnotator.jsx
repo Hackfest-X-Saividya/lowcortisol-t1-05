@@ -9,6 +9,7 @@
 //   onClear    — ()    => void
 
 import { useRef, useState, useCallback } from "react";
+import { CrossGlyph } from "./Glyph.jsx";
 
 let _nextId = 1;
 
@@ -89,10 +90,10 @@ export default function SketchAnnotator({ children, active, pins = [], onAdd, on
             />
             <div className="annot-btn-row">
               <button className="annot-btn annot-ok" onClick={commitPin} disabled={!note.trim()}>
-                ✓ Add
+                Add
               </button>
-              <button className="annot-btn annot-cancel" onClick={cancelDraft}>
-                ✕
+              <button className="annot-btn annot-cancel" onClick={cancelDraft} aria-label="Cancel">
+                <CrossGlyph size={14} />
               </button>
             </div>
           </div>

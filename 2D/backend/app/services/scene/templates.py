@@ -1,4 +1,7 @@
-"""Scene templates (shop, room, street, junction) stored in assets/templates/scene_templates."""
+"""Scene templates (shop, room, house, street, junction) stored in assets/templates/scene_templates.
+
+"house" is the sample floor plan (2D/data/image.png): five rooms with all doors and windows.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from app.services.scene.sample_plan import sample_scene
 
 TEMPLATES: dict[str, dict[str, Any]] = {
     "shop": {
@@ -94,6 +99,7 @@ TEMPLATES: dict[str, dict[str, Any]] = {
         "lighting": {"type": "indoor", "level": "normal", "sources": ["ceiling light"]},
         "events": [],
     },
+    "house": sample_scene(),
     "street": {
         "template": "street",
         "room": {"width_m": 12.0, "depth_m": 8.0, "doors": [], "windows": []},

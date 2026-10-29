@@ -8,6 +8,7 @@ Endpoints (OpenAI-compatible, see https://console.groq.com/docs):
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 
@@ -15,7 +16,7 @@ import httpx
 
 from app.config import Settings
 from app.core.errors import ProviderError
-from app.providers.base import LLMRequest, LLMResult, Segment, Transcript
+from app.providers.base import LLMRequest, LLMResult, Segment, Transcript, VisionRequest
 from app.providers.http import request_with_retries
 from app.services.storage import AUDIO_EXT
 
@@ -96,7 +97,9 @@ class GroqLLM(GroqClientMixin):
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
         super().__init__(settings, client)
         self.model = settings.groq_llm_model
-        self.models = [m for m in (settings.groq_llm_model, settings.groq_llm_fallback_model) if m]
+        backups = [m.strip() for m in settings.groq_llm_backup_models.split(",")]
+        ordered = [settings.groq_llm_model, settings.groq_llm_fallback_model, *backups]
+        self.models = list(dict.fromkeys(m for m in ordered if m))
         self.reasoning_effort = settings.groq_reasoning_effort
         self._limited: dict[str, float] = {}  # model -> monotonic time its rate limit clears
 
@@ -111,6 +114,9 @@ class GroqLLM(GroqClientMixin):
                 return await self._complete(req, model)
             except ProviderError as exc:
                 last = exc
+                bad_json = "json_validate_failed" in exc.message or "validate JSON" in exc.message
+                if (exc.status == 400 and bad_json) or "returned" in exc.message:
+                    continue  # this model wrote invalid JSON: the next one may not
                 if exc.status != 429:
                     raise
                 self._limited[model] = time.monotonic() + 60.0
@@ -139,9 +145,65 @@ class GroqLLM(GroqClientMixin):
         )
         try:
             content = resp.json()["choices"][0]["message"]["content"]
-            data = json.loads(content)
+            data = json.loads(_strip_think(content))
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ProviderError(f"Groq LLM returned unexpected payload: {exc}", provider=self.name)
         if not isinstance(data, dict):
             raise ProviderError("Groq LLM returned non-object JSON", provider=self.name)
         return LLMResult(data=data, provider=self.name, model=model, raw_text=content)
+
+
+def _strip_think(text: str) -> str:
+    """Qwen can put a <think>...</think> block before the JSON answer."""
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    return text.strip()
+
+
+def _image_part(data: bytes) -> dict[str, object]:
+    mime = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
+    url = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+    return {"type": "image_url", "image_url": {"url": url}}
+
+
+JSON_ONLY = "\nRespond with a single JSON object."
+
+
+class GroqVision(GroqClientMixin):
+    """Image understanding (Qwen 3.8 on Groq), JSON out: checks a sketch against a description."""
+
+    name = "groq"
+
+    def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(settings, client)
+        self.model = settings.groq_vision_model
+
+    async def vision_json(self, req: VisionRequest) -> LLMResult:
+        content: list[dict[str, object]] = [{"type": "text", "text": req.user}]
+        content += [_image_part(img) for img in req.images]
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": req.system + JSON_ONLY},
+                {"role": "user", "content": content},
+            ],
+            "temperature": req.temperature,
+            "max_completion_tokens": req.max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        resp = await request_with_retries(
+            self._client,
+            "POST",
+            f"{self.base_url}/chat/completions",
+            provider=self.name,
+            max_retries=self.max_retries,
+            json=body,
+        )
+        try:
+            text = resp.json()["choices"][0]["message"]["content"] or ""
+            data = json.loads(_strip_think(text))
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise ProviderError(f"Groq vision: unexpected payload: {exc}", provider=self.name)
+        if not isinstance(data, dict):
+            raise ProviderError("Groq vision returned non-object JSON", provider=self.name)
+        return LLMResult(data=data, provider=self.name, model=self.model, raw_text=text)

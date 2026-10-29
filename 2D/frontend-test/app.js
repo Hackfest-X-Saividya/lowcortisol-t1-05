@@ -209,7 +209,7 @@ async function loadTree() {
   const t = await api("GET", `/sessions/${v("sessionId")}/sketch-tree`);
   const cur = v("versionId");
   $("tree").innerHTML = t.map((n) => `<button class="${n.id === cur ? "sel" : "secondary"}" title="${n.id}" onclick="$('versionId').value='${n.id}';loadVersion()">
-    ${n.edit_source}${n.edit_type ? ":" + n.edit_type : ""}${n.parent_id ? " ← " + n.parent_id.slice(0, 4) : ""} (${n.id.slice(0, 4)})${n.witness_rating ? " ★" + n.witness_rating : ""}${n.stability_warning ? " ⚠" : ""}</button>`).join(" ");
+    ${n.edit_source}${n.edit_type ? ":" + n.edit_type : ""}${n.parent_id ? " ← " + n.parent_id.slice(0, 4) : ""} (${n.id.slice(0, 4)})${n.witness_rating ? " rated " + n.witness_rating : ""}${n.stability_warning ? " (unstable)" : ""}</button>`).join(" ");
 }
 async function loadVersion() {
   need("versionId", "Generate the first face (or pick a version in the tree) first.");
@@ -289,7 +289,7 @@ function drawScene(s) {
   for (const o of s.objects) {
     ctx.save(); const [cx, cz] = P(o.pos[0], o.pos[2]); ctx.translate(cx, cz); ctx.rotate((o.rot_y_deg * Math.PI) / 180);
     ctx.fillStyle = o.type === "road" ? "#ddd" : "#9cc3e6"; ctx.fillRect(-o.size[0] * k / 2, -o.size[2] * k / 2, o.size[0] * k, o.size[2] * k);
-    ctx.restore(); ctx.fillStyle = "#222"; ctx.font = "10px sans-serif"; ctx.fillText(o.id + (o.locked ? " 🔒" : ""), cx - 15, cz);
+    ctx.restore(); ctx.fillStyle = "#222"; ctx.font = "10px sans-serif"; ctx.fillText(o.id + (o.locked ? " [locked]" : ""), cx - 15, cz);
   }
   for (const p of s.people) {
     const [x, z] = P(p.pos[0], p.pos[2]); ctx.fillStyle = p.role === "witness" ? "#16a34a" : p.role === "suspect" ? "#dc2626" : "#a16207";

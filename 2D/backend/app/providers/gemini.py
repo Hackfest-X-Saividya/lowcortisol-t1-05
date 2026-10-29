@@ -203,8 +203,15 @@ class GeminiVision:
             http_options={"timeout": 60_000},
         )
 
-    async def analyze(self, image_bytes: bytes, mime_type: str, prompt: str) -> dict[str, Any]:
-        """Send an image + text prompt to Gemini and return parsed JSON."""
+    async def analyze(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        prompt: str,
+        example: tuple[bytes, str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Send an image + text prompt to Gemini and return parsed JSON. `example` is a worked
+        (image, mime type, expected JSON) pair shown before the image to analyse."""
         from google.genai import errors as genai_errors
         from google.genai import types
 
@@ -212,7 +219,16 @@ class GeminiVision:
             response_mime_type="application/json",
             temperature=0.1,
         )
-        contents = [
+        contents: list[Any] = []
+        if example is not None:
+            ex_bytes, ex_mime, ex_json = example
+            contents += [
+                "EXAMPLE floor plan:",
+                types.Part.from_bytes(data=ex_bytes, mime_type=ex_mime),
+                "The correct JSON for the example:\n" + json.dumps(ex_json),
+                "Now the image to analyse:",
+            ]
+        contents += [
             types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
             prompt,
         ]
@@ -222,7 +238,9 @@ class GeminiVision:
             )
         except genai_errors.APIError as exc:
             code = int(getattr(exc, "code", None) or 0)
-            raise ProviderError(f"Gemini vision error {code}", provider=self.name, status=code or None)
+            raise ProviderError(
+                f"Gemini vision error {code}", provider=self.name, status=code or None
+            )
         text = resp.text or ""
         try:
             data = json.loads(text)

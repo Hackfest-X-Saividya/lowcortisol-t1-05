@@ -16,10 +16,9 @@
     sizes   --band-x / --band-y (13% / 14% of the screen), --torch-r 260px
 */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import PencilFace from "../components/PencilFace.jsx";
+import { WallItem } from "../components/WallDecor.jsx";
 import { navigate } from "../lib/router.js";
 import { rng } from "../lib/rng.js";
-import { tornPolygon } from "../lib/torn.js";
 import "../styles/landing.css";
 
 const APP_ROUTE = "/app"; // placeholder route for the application
@@ -235,49 +234,6 @@ function samplePath(fromPt, toPt, n = 12) {
   return out;
 }
 
-// ---- board items (blank notes, polaroids, faces) -------------------------------------------
-
-function BoardItem({ item }) {
-  const { w, h, base, variant, seed } = item;
-  const vw = 100;
-  const vh = (h / w) * 100;
-  const paper = (
-    <polygon
-      points={tornPolygon(seed, vw, vh, { scrap: base === "note-scrap", jag: base === "note-scrap" ? 2.6 : 1.8 })}
-      fill="var(--manila)"
-    />
-  );
-  let inner = null;
-  if (base === "note-index") {
-    const lines = [];
-    for (let y = vh * 0.32; y < vh - 4; y += vh * 0.13) lines.push(<line key={y} x1="6" x2={vw - 5} y1={y} y2={y} stroke="var(--ink)" strokeOpacity=".1" strokeWidth=".7" />);
-    inner = (
-      <>
-        <line x1="4" x2={vw - 4} y1={vh * 0.2} y2={vh * 0.2} stroke="var(--string)" strokeOpacity=".45" strokeWidth=".8" />
-        {lines}
-      </>
-    );
-  } else if (base.startsWith("polaroid")) {
-    const pad = 7;
-    const win = vw - pad * 2;
-    inner = (
-      <>
-        <rect x={pad} y={pad} width={win} height={win} fill={variant ? "#d6c597" : "var(--ink)"} fillOpacity={variant ? 1 : 0.86} />
-        {!variant && <ellipse cx={vw / 2} cy={pad + win * 0.45} rx={win * 0.22} ry={win * 0.27} fill="var(--wall-text)" opacity=".05" />}
-        {variant && <PencilFace preset={variant} seed={seed} x={pad} y={pad} width={win} height={win} />}
-      </>
-    );
-  } else if (base === "face") {
-    inner = <PencilFace preset={variant} seed={seed} x="3" y="2" width={vw - 6} height={vh - 4} />;
-  }
-  return (
-    <svg viewBox={`0 0 ${vw} ${vh}`} width={w} height={h} className="board-item-svg">
-      <g style={{ filter: "url(#paper-grain)" }}>{paper}</g>
-      {inner}
-    </svg>
-  );
-}
-
 // ---- component ---------------------------------------------------------------------------
 
 export default function Landing() {
@@ -449,7 +405,7 @@ export default function Landing() {
                 "--delay": `${2.55 + (i / L.items.length) * 0.95}s`,
               }}
             >
-              <BoardItem item={it} />
+              <WallItem item={it} />
             </div>
           );
         })}

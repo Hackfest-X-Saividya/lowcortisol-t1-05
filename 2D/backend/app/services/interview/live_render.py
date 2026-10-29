@@ -1,6 +1,17 @@
 """Realistic live sketch for the voice interview.
 
-Two kinds of drawing, so the witness never waits on an image service:
+What the witness sees is always a generated sketch of the described person (the stock
+library face below is no longer shown: it rarely matched the description). The first sketch is
+drawn from the whole description, each feature labelled ("Hair: long curly."), worded as a
+precise drawing prompt by the LLM (Groq) and drawn directly as a forensic pencil sketch
+(``SKETCH_STYLE``); later changes EDIT that sketch (FLUX.2 reference image) so it stays the same
+person; the vision model (Groq Qwen) checks each new sketch against the description and one
+corrective edit fixes clear mismatches. While a new sketch is drawn the previous one stays.
+The image model draws a realistic photo; ``hand_drawn`` then redraws it as pencil on paper
+(contours, graphite hatching, smudging, paper grain), and moles, birthmarks and scars are
+drawn by ``marks`` exactly where the witness said (never left to the image model).
+
+Earlier design notes (library and region paths are kept as fallbacks):
 
 - **instant** (about 0.2 s, local): the closest face from the base-face library
   (``assets/base_faces``, chosen by gender, age and facial hair) -> spoken corrections applied
@@ -35,6 +46,7 @@ import cv2
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.container import Container
 from app.core import audit
 from app.core.logging import get_logger
@@ -45,13 +57,16 @@ from app.db.repositories import statements as repo
 from app.providers.base import ImageRequest, InpaintRequest
 from app.services import cases as case_service
 from app.services.interview import engine, live_warp, prompts
+from app.services.interview import portrait as pt
 from app.services.interview.fields import FIELD_MAP
 from app.services.interview.live import ADJUST_KEY, EDITS_KEY, apply_adjustments
+from app.services.sketch import hand_drawn
+from app.services.sketch import marks as face_marks
 from app.services.sketch.generation import build_prompt
-from app.services.sketch.landmarks import landmarks_to_json, load_template
-from app.services.sketch.overlays import apply_overlays
 from app.services.sketch.inpaint import inpaint_region
+from app.services.sketch.landmarks import landmarks_to_json, load_template
 from app.services.sketch.masks import region_binary
+from app.services.sketch.overlays import apply_overlays
 from app.services.sketch.render import decode_png, encode_png, line_drawing, pencil_sketch
 
 log = get_logger(__name__)
@@ -151,7 +166,15 @@ def has_face_details(sheet: dict[str, Any]) -> bool:
     return any(_val(sheet, k) for k in FACE_FIELDS)
 
 
-def realistic_prompt(sheet: dict[str, Any]) -> str:
+def realistic_prompt(sheet: dict[str, Any], style: str | None = None) -> str:
+    """The description with every feature labelled (cache key and fallback image prompt).
+    The image model is always asked for a realistic photo: ``hand_drawn`` makes the pencil look,
+    and the marks are drawn separately (see ``_face_now``)."""
+    return pt.describe(_face_now(sheet), style or GEN_STYLE)
+
+
+def legacy_prompt(sheet: dict[str, Any]) -> str:
+    """The earlier unlabelled photo prompt (kept for reference)."""
     info = build_prompt(sheet)
     p = info.prompt.replace(
         "frontal passport-style photograph", "realistic frontal passport photograph, sharp focus"
@@ -160,6 +183,137 @@ def realistic_prompt(sheet: dict[str, Any]) -> str:
     extra = [e for e in extra if e.lower() not in ("no", "none", "nothing")]
     tail = (", " + ", ".join(extra)) if extra else ""
     return f"{p}{tail}, Indian, natural skin texture, documentary photo"
+
+
+LLM_PROMPT_TIMEOUT_S = 12.0
+CHECK_TIMEOUT_S = 15.0
+_llm_prompts: OrderedDict[str, str] = OrderedDict()
+
+
+GEN_STYLE = "photo"
+
+
+def _face_now(sheet: dict[str, Any]) -> dict[str, str]:
+    """Described face features for the image model, without the marks (drawn by ``marks``)."""
+    out = {k: _val(sheet, k) for k in FACE_FIELDS if _val(sheet, k)}
+    for k in ("moles", "scars"):
+        out.pop(k, None)
+    if face_marks.describes_mark(out.get("other_marks", "")):
+        out.pop("other_marks")
+    return out
+
+
+def _marks(sheet: dict[str, Any]) -> list[face_marks.Mark]:
+    return face_marks.from_sheet({k: _val(sheet, k) for k in face_marks.MARK_KEYS})
+
+
+async def _generation_prompt(container: Container, snap: dict[str, str]) -> str:
+    """Drawing prompt written by the LLM from the labelled description (cached); the plain
+    labelled description when the LLM is unavailable."""
+    settings = container.settings
+    style = GEN_STYLE
+    if not settings.sketch_llm_prompt or settings.mock_mode:
+        return pt.describe(snap, style)
+    key = json.dumps([snap, style], sort_keys=True)
+    if key in _llm_prompts:
+        return _llm_prompts[key]
+    try:
+        res = await asyncio.wait_for(
+            container.providers.llm_json(pt.llm_prompt_request(snap, style)), LLM_PROMPT_TIMEOUT_S
+        )
+        text = str(res.data.get("prompt") or "").strip()
+        if res.provider == "mock" or len(text) < 20:
+            raise ValueError("no usable prompt")
+        out = pt.with_style(text, style, snap)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live_render: LLM sketch prompt unavailable (%s)", type(exc).__name__)
+        return pt.describe(snap, style)
+    _llm_prompts[key] = out
+    while len(_llm_prompts) > _CACHE_MAX:
+        _llm_prompts.popitem(last=False)
+    return out
+
+
+def _flux_edit_ready(container: Container) -> bool:
+    s = container.settings
+    reg = container.providers
+    return (
+        not s.mock_mode
+        and "flux-2" in s.cf_inpaint_model
+        and bool(s.inpaint_chain)
+        and reg.ready("inpaint", "cloudflare")
+        and reg.ready("image", "cloudflare")  # cooling after the daily quota ran out
+    )
+
+
+async def _flux_edit(
+    container: Container, img: np.ndarray, instruction: str, seed: int
+) -> tuple[np.ndarray, str, str] | None:
+    """Whole-image FLUX.2 reference edit (the same person, only the named changes); None when
+    unavailable or when the result is not exactly one face."""
+    if not _flux_edit_ready(container):
+        return None
+    h, w = img.shape[:2]
+    try:
+        res = await asyncio.wait_for(
+            container.providers.inpaint(
+                InpaintRequest(
+                    image_png=encode_png(img),
+                    mask_png=b"",
+                    prompt=instruction,
+                    instruction=instruction,
+                    seed=seed,
+                    width=w,
+                    height=h,
+                )
+            ),
+            PORTRAIT_TIMEOUT_S,
+        )
+        out = decode_png(res.png)
+        if out.shape[:2] != (h, w):
+            out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LANCZOS4)
+        faces = await asyncio.to_thread(container.landmarker.detect, out)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live_render: sketch edit failed (%s)", type(exc).__name__)
+        return None
+    if len(faces) != 1:
+        log.warning("live_render: sketch edit rejected (%d faces found)", len(faces))
+        return None
+    return out, res.provider, res.model
+
+
+async def _checked(
+    container: Container,
+    img: np.ndarray,
+    snap: dict[str, str],
+    provider: str,
+    model: str,
+    seed: int,
+) -> tuple[np.ndarray, str, str]:
+    """The vision model compares the sketch with the description; clear mismatches are fixed
+    with one FLUX.2 edit. Any failure keeps the sketch as it is."""
+    s = container.settings
+    if not s.sketch_verify or s.mock_mode or not snap or not _flux_edit_ready(container):
+        return img, provider, model
+    small = cv2.resize(img, (768, 768), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    if not ok:
+        return img, provider, model
+    try:
+        res = await asyncio.wait_for(
+            container.providers.vision_json(pt.check_request(buf.tobytes(), snap)),
+            CHECK_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live_render: sketch check unavailable (%s)", type(exc).__name__)
+        return img, provider, model
+    fixes = pt.fix_lines(res.data, snap) if res.provider != "mock" else []
+    if not fixes:
+        return img, provider, model
+    log.info("live_render: correcting %d mismatched feature(s)", len(fixes))
+    got = await _flux_edit(container, img, pt.edit_instruction(fixes, GEN_STYLE), seed)
+    # no redraw on the fallback service: its rate limit would cool it down for minutes
+    return got if got is not None else (img, provider, model)
 
 
 _FULL_RE = re.compile(r"chubby|fat|plump|full|fleshy|heavy|round|puffy|wide")
@@ -188,9 +342,7 @@ def _adjust(sheet: dict[str, Any]) -> dict[str, float]:
     merged: dict[str, float] = {k: float(v) for k, v in _implied_adjust(sheet).items()}
     for k, v in (sheet.get(ADJUST_KEY) or {}).items():
         merged[k] = merged.get(k, 0.0) + float(v)
-    return {
-        k: round(max(-0.45, min(0.45, v)), 3) for k, v in merged.items() if abs(v) > 1e-3
-    }
+    return {k: round(max(-0.45, min(0.45, v)), 3) for k, v in merged.items() if abs(v) > 1e-3}
 
 
 def _jpeg_b64(img: np.ndarray, size: int = PREVIEW_PX) -> str:
@@ -304,14 +456,23 @@ def _instant_overlays(sheet: dict[str, Any]) -> list[dict[str, Any]]:
 # ---- composing -------------------------------------------------------------------------------
 
 
+def _drawn(container: Container) -> bool:
+    """Generated photos are redrawn by hand (``hand_drawn``), with no pasted overlays."""
+    return container.settings.sketch_style == "pencil"
+
+
 def _layers(
     container: Container,
     photo: np.ndarray,
     lm: np.ndarray | None,
     adjust: dict[str, float],
     overlays: list[dict[str, Any]],
+    drawn: bool = False,
+    mark_list: list[face_marks.Mark] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     settings = container.settings
+    if drawn:
+        overlays = []  # the image model drew any headwear / eyewear itself
     warped = photo
     if lm is not None and adjust:
         warped, lm = live_warp.warp(photo, lm, adjust)
@@ -320,7 +481,14 @@ def _layers(
             warped, _ = apply_overlays(settings, warped, lm, overlays)
         except Exception:  # noqa: BLE001
             log.warning("live overlay failed")
-    return warped, line_drawing(warped, settings), pencil_sketch(warped, settings), lm
+    if not drawn:
+        return warped, line_drawing(warped, settings), pencil_sketch(warped, settings), lm
+    sketch, lines = hand_drawn.render(warped, lm)
+    if mark_list:
+        where = lm if lm is not None else load_template().landmarks
+        sketch = face_marks.draw(sketch, where, mark_list)
+        lines = face_marks.draw(lines, where, mark_list)
+    return warped, lines, sketch, lm
 
 
 def _pack(
@@ -395,10 +563,17 @@ async def portrait(container: Container, sheet: dict[str, Any], seed: int) -> di
     adjust = _adjust(sheet)
     photo_entry = _cache.get("photo:" + photo_key)
     if photo_entry is None:
+        snap = _face_now(sheet)
+        drawing_prompt = await _generation_prompt(container, snap)
+        negative = NEGATIVE
         res = await asyncio.wait_for(
             container.providers.generate_image(
                 ImageRequest(
-                    prompt=prompt, negative_prompt=NEGATIVE, width=SIZE, height=SIZE, seed=seed
+                    prompt=drawing_prompt,
+                    negative_prompt=negative,
+                    width=SIZE,
+                    height=SIZE,
+                    seed=seed,
                 )
             ),
             PORTRAIT_TIMEOUT_S,
@@ -406,6 +581,9 @@ async def portrait(container: Container, sheet: dict[str, Any], seed: int) -> di
         photo = decode_png(res.png)
         if photo.shape[:2] != (SIZE, SIZE):
             photo = cv2.resize(photo, (SIZE, SIZE), interpolation=cv2.INTER_AREA)
+        photo, gen_provider, gen_model = await _checked(
+            container, photo, snap, res.provider, res.model, seed
+        )
         lm = None
         source = "template"
         if res.provider == "mock" or container.settings.mock_mode:
@@ -415,14 +593,23 @@ async def portrait(container: Container, sheet: dict[str, Any], seed: int) -> di
                 faces = await asyncio.to_thread(container.landmarker.detect, photo)
                 if faces:
                     lm, source = faces[0], "mediapipe"
+                    if _drawn(container):  # a far-away figure -> head and shoulders
+                        photo, lm = hand_drawn.frame_head(photo, lm)
             except Exception:  # noqa: BLE001
                 lm = None
-        photo_entry = {"photo": photo, "lm": lm, "provider": res.provider, "model": res.model,
+        photo_entry = {"photo": photo, "lm": lm, "provider": gen_provider, "model": gen_model,
                        "source": source}  # fmt: skip
         _remember("photo:" + photo_key, photo_entry)
     lm0 = photo_entry["lm"]
     warped, lines, sketch, lm = await asyncio.to_thread(
-        _layers, container, photo_entry["photo"], None if lm0 is None else lm0.copy(), adjust, []
+        _layers,
+        container,
+        photo_entry["photo"],
+        None if lm0 is None else lm0.copy(),
+        adjust,
+        [],
+        _drawn(container),
+        _marks(sheet),
     )
     out = _pack(
         "portrait", prompt, adjust, photo_entry["provider"], photo_entry["model"],
@@ -494,7 +681,11 @@ async def _apply_free_edits(container: Container, st: _Live, sheet: dict[str, An
     if not pending or st.base_photo is None:
         return False
     settings = container.settings
-    if settings.mock_mode or "flux-2" not in settings.cf_inpaint_model or not settings.inpaint_chain:
+    if (
+        settings.mock_mode
+        or "flux-2" not in settings.cf_inpaint_model
+        or not settings.inpaint_chain
+    ):
         return False  # reference editing needs a FLUX.2 model
     st.applied_edits.extend(pending)  # attempted: never loop on a failing edit
     h, w = st.base_photo.shape[:2]
@@ -537,6 +728,8 @@ def _changed_regions(st: _Live, sheet: dict[str, Any]) -> tuple[list[str], bool]
     """
     regions: list[str] = []
     for fk in FACE_FIELDS:
+        if fk in face_marks.MARK_KEYS and get_settings().sketch_style == "pencil":
+            continue  # moles, birthmarks and scars are drawn on the sketch (see _marks)
         cur = _val(sheet, fk)
         prev = st.base_fields.get(fk, "")
         if cur == prev:
@@ -563,6 +756,12 @@ async def portrait_incremental(
       4. No region change → apply warp/overlays on base only (no network call, base_fields NOT updated).
       5. Region changed → inpaint changed region(s), update base.
     """
+    # ── 0. Edit the previous sketch: only what the witness changed (same person) ──
+    if st.base_photo is not None:
+        edited = await _edit_changes(container, st, sheet, seed)
+        if edited is not None:
+            return edited
+
     regions, needs_regen = _changed_regions(st, sheet)
 
     # ── 1. Core identity changed or no base yet ──────────────────────────────
@@ -580,8 +779,9 @@ async def portrait_incremental(
         overlays = _instant_overlays(sheet)
         lm = st.base_lm.copy() if st.base_lm is not None else None
         warped, lines, sketch, lm_out = await asyncio.to_thread(
-            _layers, container, st.base_photo, lm, adjust, overlays
-        )
+            _layers, container, st.base_photo, lm, adjust, overlays, _drawn(container),
+            _marks(sheet),
+        )  # fmt: skip
         prompt = realistic_prompt(sheet)
         return _pack(
             "portrait", prompt, adjust, st.base_provider, st.base_model,
@@ -643,7 +843,7 @@ async def portrait_incremental(
     overlays = _instant_overlays(sheet)
     lm_warp = lm_new.copy() if lm_new is not None else None
     warped, lines, sketch, lm_out = await asyncio.to_thread(
-        _layers, container, photo, lm_warp, adjust, overlays
+        _layers, container, photo, lm_warp, adjust, overlays, _drawn(container), _marks(sheet)
     )
     prompt = realistic_prompt(sheet)
     out = _pack(
@@ -659,6 +859,46 @@ async def portrait_incremental(
     st.base_model = model
     st.base_fields = {k: _val(sheet, k) for k in FACE_FIELDS}
     return out
+
+
+async def _edit_changes(
+    container: Container, st: _Live, sheet: dict[str, Any], seed: int
+) -> dict[str, Any] | None:
+    """One FLUX.2 reference edit naming the changed features; None to use the other paths
+    (no edit model, nothing changed, a different gender = a different person)."""
+    old = {k: v for k, v in st.base_fields.items() if v}
+    new = _face_now(sheet)
+    if old.get("gender") and new.get("gender") and old["gender"] != new["gender"]:
+        return None
+    changes = pt.edit_lines(old, new)
+    if not changes or st.base_photo is None:
+        return None
+    got = await _flux_edit(container, st.base_photo, pt.edit_instruction(changes, GEN_STYLE), seed)
+    if got is None:
+        return None
+    photo, provider, model = got
+    photo, provider, model = await _checked(container, photo, new, provider, model, seed)
+    lm: np.ndarray | None = None
+    source = "template"
+    try:
+        faces = await asyncio.to_thread(container.landmarker.detect, photo)
+        if faces:
+            lm, source = faces[0], "mediapipe"
+    except Exception:  # noqa: BLE001
+        lm = None
+    st.base_photo = photo.copy()
+    st.base_lm, st.base_lm_source = lm, source
+    st.base_provider, st.base_model = provider, model
+    st.base_fields = {k: _val(sheet, k) for k in FACE_FIELDS}
+    adjust = _adjust(sheet)
+    warped, lines, sketch, lm_out = await asyncio.to_thread(
+        _layers, container, photo, None if lm is None else lm.copy(), adjust, [],
+        _drawn(container), _marks(sheet),
+    )  # fmt: skip
+    return _pack(
+        "portrait", realistic_prompt(sheet), adjust, provider, model, source,
+        photo, warped, lines, sketch, lm_out,
+    )  # fmt: skip
 
 
 async def _worker(container: Container, session_id: str) -> None:
@@ -681,7 +921,9 @@ async def _worker(container: Container, session_id: str) -> None:
                 await _apply_free_edits(container, st, sheet)
                 out = await portrait_incremental(container, st, sheet, seed)
                 if _pending_edits(st, sheet) and await _apply_free_edits(container, st, sheet):
-                    out = await portrait_incremental(container, st, sheet, seed)  # base was regenerated
+                    out = await portrait_incremental(
+                        container, st, sheet, seed
+                    )  # base was regenerated
             out["edits"] = list(sheet.get(EDITS_KEY) or [])
             st.seq += 1
             st.latest, st.latest_key, st.failed = out, key, ""
@@ -758,25 +1000,30 @@ async def render(
         return {"ready": False, "reason": "not_enough_detail", "preview_fields": preview_fields}
 
     seed = session_seed(sess.id)
-    key = _request(container, sess.id, sheet, seed)
     st = _state(sess.id)
+    # While the witness is still talking and the main image service is out of quota, keep the
+    # current sketch instead of queueing a drawing for every few words on the slow fallback.
+    hold = (
+        not commit
+        and bool(text)
+        and st.latest is not None
+        and not container.settings.mock_mode
+        and not container.providers.ready("image", container.settings.image_chain[0])
+    )
+    key = st.latest_key if hold else _request(container, sess.id, sheet, seed)
     wait = (30.0 if commit else 0.0) if wait_s is None else max(0.0, min(wait_s, 55.0))
     ev = st.done.get(key)
+    timed_out = False
     if wait and ev is not None:
         try:
             await asyncio.wait_for(ev.wait(), wait)
         except TimeoutError:
-            pass
-    # The new key isn't ready yet.  Prefer the previous portrait over the instant
-    # library frame so the witness never sees a regression to a generic face.
-    out: dict[str, Any] | None = st.latest if st.latest_key == key else None
-    if out is None and st.latest is not None and st.latest["kind"] == "portrait":
-        # Return the previous portrait (still visually correct while the inpaint runs)
-        out = st.latest
+            timed_out = True
+    # The sketch for this description may still be drawing: show the previous sketch meanwhile
+    # (never the stock library face, which rarely matches the description).
+    current = st.latest is not None and st.latest_key == key
+    out: dict[str, Any] | None = st.latest
     if out is None:
-        out = await asyncio.to_thread(instant, container, sheet, seed)
-    if out is None:
-
         return {
             "ready": False,
             "reason": "drawing",
@@ -786,7 +1033,8 @@ async def render(
         }
 
     version_id = None
-    if commit:
+    # a previous sketch is only saved when the caller waited for the new one and it did not come
+    if commit and (current or timed_out):
         version_id = await _commit(db, container, actor, sess, out, seed)
     audit.record(
         db,
@@ -808,7 +1056,7 @@ async def render(
     return {
         "ready": True,
         "kind": out["kind"],
-        "pending": st.task is not None and out["kind"] != "portrait",
+        "pending": st.task is not None or not current,
         "seq": st.seq,
         "version_id": version_id,
         "lines_b64": out["lines_b64"],

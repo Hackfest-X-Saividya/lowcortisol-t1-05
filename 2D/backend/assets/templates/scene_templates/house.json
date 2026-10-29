@@ -1,0 +1,320 @@
+{
+  "template": "house",
+  "room": {
+    "width_m": 8.9,
+    "depth_m": 6.75,
+    "doors": [],
+    "windows": [],
+    "outline": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        8.9,
+        0.0
+      ],
+      [
+        8.9,
+        5.2
+      ],
+      [
+        3.2,
+        5.2
+      ],
+      [
+        3.2,
+        6.75
+      ],
+      [
+        0.0,
+        6.75
+      ]
+    ],
+    "walls": [
+      {
+        "id": "wall_north",
+        "a": [
+          0.0,
+          0.0
+        ],
+        "b": [
+          8.9,
+          0.0
+        ],
+        "exterior": true,
+        "openings": [
+          {
+            "id": "window_room1_north",
+            "kind": "window",
+            "offset_m": 1.6,
+            "width_m": 1.8
+          },
+          {
+            "id": "window_room2_north_a",
+            "kind": "window",
+            "offset_m": 5.15,
+            "width_m": 1.7
+          },
+          {
+            "id": "window_room2_north_b",
+            "kind": "window",
+            "offset_m": 6.95,
+            "width_m": 1.75
+          }
+        ]
+      },
+      {
+        "id": "wall_east",
+        "a": [
+          8.9,
+          0.0
+        ],
+        "b": [
+          8.9,
+          5.2
+        ],
+        "exterior": true,
+        "openings": [
+          {
+            "id": "window_room4_east",
+            "kind": "window",
+            "offset_m": 2.95,
+            "width_m": 1.75
+          }
+        ]
+      },
+      {
+        "id": "wall_south_hall",
+        "a": [
+          3.2,
+          5.2
+        ],
+        "b": [
+          8.9,
+          5.2
+        ],
+        "exterior": true,
+        "openings": [
+          {
+            "id": "door_front",
+            "kind": "door",
+            "offset_m": 1.65,
+            "width_m": 0.9,
+            "hinge": "end",
+            "opens": "south"
+          }
+        ]
+      },
+      {
+        "id": "wall_south_step",
+        "a": [
+          3.2,
+          5.2
+        ],
+        "b": [
+          3.2,
+          6.75
+        ],
+        "exterior": true,
+        "openings": []
+      },
+      {
+        "id": "wall_south_room3",
+        "a": [
+          0.0,
+          6.75
+        ],
+        "b": [
+          3.2,
+          6.75
+        ],
+        "exterior": true,
+        "openings": [
+          {
+            "id": "window_room3_south",
+            "kind": "window",
+            "offset_m": 0.65,
+            "width_m": 1.8
+          }
+        ]
+      },
+      {
+        "id": "wall_west",
+        "a": [
+          0.0,
+          0.0
+        ],
+        "b": [
+          0.0,
+          6.75
+        ],
+        "exterior": true,
+        "openings": [
+          {
+            "id": "window_room1_west",
+            "kind": "window",
+            "offset_m": 0.45,
+            "width_m": 1.8
+          },
+          {
+            "id": "window_room3_west",
+            "kind": "window",
+            "offset_m": 3.85,
+            "width_m": 1.75
+          }
+        ]
+      },
+      {
+        "id": "wall_rooms_hall",
+        "a": [
+          0.0,
+          2.5
+        ],
+        "b": [
+          8.9,
+          2.5
+        ],
+        "exterior": false,
+        "openings": [
+          {
+            "id": "door_room1",
+            "kind": "door",
+            "offset_m": 3.6,
+            "width_m": 0.9,
+            "hinge": "end",
+            "opens": "north"
+          },
+          {
+            "id": "door_room2",
+            "kind": "door",
+            "offset_m": 5.25,
+            "width_m": 0.9,
+            "hinge": "start",
+            "opens": "north"
+          }
+        ]
+      },
+      {
+        "id": "wall_room1_room2",
+        "a": [
+          4.95,
+          0.0
+        ],
+        "b": [
+          4.95,
+          2.5
+        ],
+        "exterior": false,
+        "openings": []
+      },
+      {
+        "id": "wall_hall_room3",
+        "a": [
+          3.2,
+          2.5
+        ],
+        "b": [
+          3.2,
+          5.2
+        ],
+        "exterior": false,
+        "openings": [
+          {
+            "id": "door_room3",
+            "kind": "door",
+            "offset_m": 0.3,
+            "width_m": 0.9,
+            "hinge": "start",
+            "opens": "west"
+          }
+        ]
+      },
+      {
+        "id": "wall_hall_room4",
+        "a": [
+          6.35,
+          2.5
+        ],
+        "b": [
+          6.35,
+          5.2
+        ],
+        "exterior": false,
+        "openings": [
+          {
+            "id": "door_room4",
+            "kind": "door",
+            "offset_m": 0.3,
+            "width_m": 0.9,
+            "hinge": "start",
+            "opens": "east"
+          }
+        ]
+      }
+    ],
+    "areas": [
+      {
+        "id": "room1",
+        "name": "Room 1",
+        "rect": [
+          0.0,
+          0.0,
+          4.95,
+          2.5
+        ]
+      },
+      {
+        "id": "room2",
+        "name": "Room 2",
+        "rect": [
+          4.95,
+          0.0,
+          8.9,
+          2.5
+        ]
+      },
+      {
+        "id": "room3",
+        "name": "Room 3",
+        "rect": [
+          0.0,
+          2.5,
+          3.2,
+          6.75
+        ]
+      },
+      {
+        "id": "hall",
+        "name": "Hall",
+        "rect": [
+          3.2,
+          2.5,
+          6.35,
+          5.2
+        ]
+      },
+      {
+        "id": "room4",
+        "name": "Room 4",
+        "rect": [
+          6.35,
+          2.5,
+          8.9,
+          5.2
+        ]
+      }
+    ]
+  },
+  "objects": [],
+  "people": [],
+  "evidence": [],
+  "lighting": {
+    "type": "indoor",
+    "level": "normal",
+    "sources": [
+      "ceiling light"
+    ]
+  },
+  "events": []
+}

@@ -19,11 +19,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Board, Pin } from "../../components/Board.jsx";
 import { Paper, Stamp, InkButton } from "../../components/Paper.jsx";
-import { PauseGlyph, ArrowGlyph, MicGlyph } from "../../components/Glyph.jsx";
+import { PauseGlyph, ArrowGlyph, MicGlyph, CrossGlyph } from "../../components/Glyph.jsx";
 import SketchCanvas from "../../components/SketchCanvas.jsx";
 import SketchAnnotator, { pinsToText } from "../../components/SketchAnnotator.jsx";
 import AuthImage from "../../components/AuthImage.jsx";
 import SceneMap from "../../components/SceneMap.jsx";
+import { countOpenings } from "../../components/scenePlan.js";
+import Model3DView from "../../components/Model3DView.jsx";
 import { lazy, Suspense } from "react";
 import { api, ApiError, storeWitnessToken, takeWitnessToken, waitJob } from "../../lib/api.js";
 import { useT } from "../../lib/i18n.js";
@@ -41,6 +43,7 @@ const MENU = [
   ["scene", "Crime scene wall"],
   ["vault", "Evidentiary vault"],
   ["timeline", "Incident timeline"],
+  ["model3d", "3D model"],
 ];
 const SIGN_FEATURES = ["face_shape", "eyes", "brows", "nose", "mouth", "jaw", "hair"];
 const CONF = { high: "sure", medium: "somewhat", low: "guessing", not_remembered: "not_remembered" };
@@ -105,6 +108,7 @@ function WitnessWindow({ sid, token }) {
   const [lang, setLang] = useState("kn");
   const t = useT(lang);
   const [view, setView] = useState("sketch");
+  const [model3dOpened, setModel3dOpened] = useState(false); // keeps the 3D face while closed
   const [paused, setPaused] = useState(false);
   const [officerPaused, setOfficerPaused] = useState(false);
   const [ended, setEnded] = useState(null); // "expired" | "done"
@@ -231,8 +235,10 @@ function WitnessWindow({ sid, token }) {
           // with the instant library face — keep the previous image on screen while the
           // background worker generates the new portrait for the updated description.
           showRender(r, { allowDowngrade: showInstant });
-          needCommit.current = r.kind !== "portrait";
+          needCommit.current = r.kind !== "portrait" || !r.version_id;
           if (r.version_id) reportShown({ sketch_version_id: r.version_id, screen: "live_sketch" });
+        } else if (r.pending) {
+          needCommit.current = true; // save the sketch for this description when it arrives
         }
         // If the background portrait worker is now running, start polling for it.
         if (r.pending) setRefining(true);
@@ -401,6 +407,17 @@ function WitnessWindow({ sid, token }) {
     speaker.stopSpeaking();
     setPhase((p) => (p === "signoff" ? p : "ready"));
   }, [listener, speaker]);
+
+  // evidence index: "3D model" opens the 3D face builder over the wall (the artist stops
+  // talking and listening while it is open)
+  const openView = (key) => {
+    if (key === "model3d") {
+      if (running.current || phase === "speaking" || phase === "listening") halt();
+      setModel3dOpened(true);
+    }
+    setView(key);
+  };
+  const closeModel3d = useCallback(() => setView("sketch"), []);
 
   const start = () => {
     setNotice(null);
@@ -622,7 +639,7 @@ function WitnessWindow({ sid, token }) {
               onClick={() => setAnnotating((a) => !a)}
               title={annotating ? "Done annotating" : "Click sketch to mark a point"}
             >
-              {annotating ? "✓ Done marking" : "📍 Mark a point"}
+              {annotating ? "Done marking" : "Mark a point"}
             </button>
           )}
         </div>
@@ -631,8 +648,10 @@ function WitnessWindow({ sid, token }) {
           <div className="pins-summary">
             {pins.map((p, i) => (
               <div key={p.id} className="pin-chip">
-                <span>📍 {i + 1}. {p.note}</span>
-                <button onClick={() => removePin(p.id)}>✕</button>
+                <span>{i + 1}. {p.note}</span>
+                <button onClick={() => removePin(p.id)} aria-label={`Remove mark ${i + 1}`}>
+                  <CrossGlyph size={14} />
+                </button>
               </div>
             ))}
           </div>
@@ -721,7 +740,7 @@ function WitnessWindow({ sid, token }) {
                 style={{ width: `${88 + ((i * 7) % 12)}%` }}
                 pins={view === key ? [{ id: `menu-pin-${key}`, x: "12%" }] : []}
               >
-                <button type="button" className="menu-btn" aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}>
+                <button type="button" className="menu-btn" aria-current={view === key ? "page" : undefined} onClick={() => openView(key)}>
                   <span className="ink">{label}</span>
                 </button>
               </Paper>
@@ -767,6 +786,8 @@ function WitnessWindow({ sid, token }) {
         </Paper>
       </footer>
 
+      {model3dOpened && <Model3DView open={view === "model3d"} onClose={closeModel3d} />}
+
       {paused && (
         <div className="pause-cover" role="dialog" aria-modal="true" aria-label="Screen paused">
           <Board className="pause-board" links={[["ring-tma", "pause-pin"]]}>
@@ -790,8 +811,8 @@ function WitnessWindow({ sid, token }) {
 
 // ---- side note for the non-sketch menu views ------------------------------------------------
 function SideNote({ t, view, onBack }) {
-  const text = { scene: t("sceneNote"), vault: t("vaultNote"), timeline: t("timelineNote") }[view];
-  const head = { scene: t("sceneHeading"), vault: t("vaultHeading"), timeline: t("timelineHeading") }[view];
+  const text = { scene: t("sceneNote"), vault: t("vaultNote"), timeline: t("timelineNote"), model3d: "Describe the face to build it in 3D." }[view];
+  const head = { scene: t("sceneHeading"), vault: t("vaultHeading"), timeline: t("timelineHeading"), model3d: "3D model" }[view];
   return (
     <div className="choose">
       <Paper seed={`side-${view}`} rotate={-0.6} jag={2.4} className="choose-head">
@@ -1012,25 +1033,46 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
       const fd = new FormData();
       fd.append("image", file);
       const result = await call(`/sessions/${sid}/scene/analyze-map`, { method: "POST", form: fd });
-      const { _error, ...clean } = result || {};
+      const { _error, _source, ...clean } = result || {};
       const r = clean.room || {};
+      const { doors, windows } = countOpenings(r);
       const counts = [
+        [(r.areas || []).length, "room"],
         [(clean.objects || []).length, "furniture"],
-        [(r.doors || []).length, "door"],
-        [(r.windows || []).length, "window"],
+        [doors, "door"],
+        [windows, "window"],
         [(clean.people || []).length, "person"],
       ]
         .filter(([n]) => n > 0)
-        .map(([n, w]) => `${n} ${w}${n > 1 ? (w === "person" ? "" : "s") : ""}`.replace("furnitures", "furniture").replace("1 persons", "1 person"));
+        .map(([n, w]) => `${n} ${w}${n > 1 && w !== "furniture" && w !== "person" ? "s" : ""}`);
       setUploadNote(
-        _error
-          ? `Could not read the image automatically (${_error}). You can still add people with the buttons above the 3D view.`
+        _source === "sample"
+          ? _error
+            ? `Could not read that image (${_error}). Showing the sample floor plan instead: ${counts.join(", ")}.`
+            : `Sample floor plan: ${counts.join(", ")}.`
           : counts.length
             ? `Found from the image: ${counts.join(", ")}.`
             : "Nothing recognisable was found in that image. Try a clearer photo or floor plan.",
       );
       setUploadedScene(clean);
       setView3d(true); // auto-switch to 3D on upload
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // the sample floor plan (2D/data/image.png) is the "house" scene template
+  const loadSample = async () => {
+    setBusy(true);
+    try {
+      const house = (await call("/scene-templates"))?.house;
+      if (!house) throw new Error("The sample floor plan is not available");
+      const { doors, windows } = countOpenings(house.room);
+      setUploadedScene(house);
+      setUploadNote(`Sample floor plan: ${(house.room.areas || []).length} rooms, ${doors} doors, ${windows} windows.`);
+      setView3d(true);
     } catch (e) {
       fail(e);
     } finally {
@@ -1051,13 +1093,13 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
             className={`scene-view-btn ${!view3d ? "active" : ""}`}
             onClick={() => setView3d(false)}
           >
-            🗺 2D Map
+            2D Map
           </button>
           <button
             className={`scene-view-btn ${view3d ? "active" : ""}`}
             onClick={() => setView3d(true)}
           >
-            🏠 3D View
+            3D View
           </button>
           {/* Upload a floor plan image to generate 3D scene */}
           <button
@@ -1065,7 +1107,10 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
             onClick={() => mapFileRef.current?.click()}
             disabled={busy}
           >
-            📤 Upload Map
+            Upload Map
+          </button>
+          <button className="scene-view-btn" onClick={loadSample} disabled={busy}>
+            Sample floor plan
           </button>
           <input
             ref={mapFileRef}
@@ -1080,7 +1125,7 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
           />
           {uploadedScene && (
             <button className="scene-view-btn" onClick={() => { setUploadedScene(null); setUploadNote(""); setView3d(false); }}>
-              ✕ Clear upload
+              Clear upload
             </button>
           )}
         </div>
@@ -1131,7 +1176,10 @@ function ScenePane({ t, sid, call, job, session, reloadSession, reportShown, fai
               Build the place
             </InkButton>
             <InkButton onClick={() => mapFileRef.current?.click()} disabled={busy}>
-              📤 Upload floor plan
+              Upload floor plan
+            </InkButton>
+            <InkButton onClick={loadSample} disabled={busy}>
+              Sample floor plan
             </InkButton>
             <input
               ref={mapFileRef}

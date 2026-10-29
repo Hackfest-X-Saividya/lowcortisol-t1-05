@@ -234,8 +234,9 @@ def build_scene(
 ) -> LLMRequest:
     system = (
         f"{_COMMON_RULES} Build a crime-scene layout JSON from the witness description. "
-        "Choose the closest template (shop|room|street|junction) and adapt it: keep the "
-        "room size, place objects the witness mentioned (type from the template object "
+        "Choose the closest template (shop|room|house|street|junction) and adapt it: keep the "
+        "room size and, for a floor plan, its walls, doors, windows, outline and areas exactly; "
+        "place objects the witness mentioned (type from the template object "
         "types), place people (roles: witness, suspect, other) with positions in metres "
         "[x, y, z] on the floor (y=0), facing_deg, and list evidence markers and ordered "
         'events. Return {"scene": {...}} matching the template structure.'

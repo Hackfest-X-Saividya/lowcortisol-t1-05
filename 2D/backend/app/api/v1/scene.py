@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, UploadFile, status
 
 from app.api.deps import ContainerDep, DbDep, PrincipalDep
 from app.schemas.common import JobAccepted
@@ -101,69 +101,95 @@ async def analyze_scene_map(
     principal: PrincipalDep,
     db: DbDep,
     container: ContainerDep,
-    image: "UploadFile",
+    image: UploadFile,
 ) -> dict[str, Any]:
-    """Upload a crime scene floor-plan image and get back a 3-D scene JSON.
+    """Upload a floor-plan image (or a photo of a room) and get back a 3-D scene JSON.
 
-    The image is sent to Gemini Vision which extracts room dimensions, furniture,
-    doors/windows, people positions and evidence markers.  The result is coerced
-    through the Scene schema so the frontend can render it immediately with CrimeScene3D.
+    The sample floor plan (2D/data/image.png) is the reference for every upload: uploading it
+    returns its traced plan directly, Gemini Vision is shown it as a worked example (walls, doors
+    and windows) before reading any other image, and when the image cannot be read the sample
+    plan is returned so the 3D view still has walls, doors and windows to show. The response's
+    "_source" is "sample" or "image"; "_error" says why the image could not be read.
     """
-    from app.providers.gemini import GeminiVision
-    from app.services.scene.schema import Scene, coerce_scene_input
     from app.core.errors import ProviderError
+    from app.core.logging import get_logger
+    from app.providers.gemini import GeminiVision
+    from app.services.scene import sample_plan
+    from app.services.scene.builder import clamp_scene, snap_scene
+    from app.services.scene.schema import Scene
 
     raw = await image.read()
     mime = image.content_type or "image/jpeg"
 
-    SCENE_PROMPT = """You are a crime-scene analyst.  Analyse the floor-plan / sketch image and
-return a single JSON object (no prose, no markdown) in this exact schema:
+    def sample(error: str | None = None) -> dict[str, Any]:
+        out = Scene.model_validate(sample_plan.sample_scene()).model_dump()
+        out["_source"] = "sample"
+        if error:
+            out["_error"] = error[:200]
+        return out
+
+    if sample_plan.is_sample_image(raw):
+        return sample()
+
+    SCENE_PROMPT = """You are a forensic scene analyst. The image is a floor plan / hand-drawn
+sketch of a place, or a photograph of a room. Rebuild the space as ONE JSON object (no prose, no
+markdown) in the same format as the example: the floor plan as straight wall segments, each with
+its doors and windows.
 
 {
+  "template": "house",
   "room": {
-    "width_m": <float>,
-    "depth_m": <float>,
-    "doors": [{"id":"d1","wall":"south","offset_m":1.0,"width_m":0.9}],
-    "windows": [{"id":"w1","wall":"north","offset_m":0.5,"width_m":1.2}]
+    "width_m": <overall east-west size>, "depth_m": <overall north-south size>,
+    "doors": [], "windows": [],
+    "outline": [[x,z], ...],
+    "walls": [
+      {"id":"wall_north","a":[x,z],"b":[x,z],"exterior":true,
+       "openings":[
+         {"id":"window1","kind":"window","offset_m":1.6,"width_m":1.8},
+         {"id":"door1","kind":"door","offset_m":3.6,"width_m":0.9,"hinge":"end","opens":"north"}
+       ]}
+    ],
+    "areas": [{"id":"room1","name":"Bedroom","rect":[x0,z0,x1,z1]}]
   },
-  "objects": [
-    {"id":"table1","type":"table","pos":[x,0,z],"size":[w,h,d],"rot_y_deg":0}
-  ],
-  "people": [
-    {"id":"witness0","role":"witness","pos":[x,0,z],"facing_deg":0},
-    {"id":"suspect0","role":"suspect","pos":[x,0,z],"facing_deg":180}
-  ],
-  "evidence": [
-    {"id":"ev1","label":"knife","pos":[x,0,z]}
-  ],
+  "objects": [{"id":"bed1","type":"bed","pos":[x,0,z],"size":[w,h,d],"rot_y_deg":0}],
+  "people": [{"id":"person1","role":"suspect","pos":[x,0,z],"facing_deg":180}],
+  "evidence": [{"id":"ev1","label":"knife","pos":[x,0,z]}],
   "lighting": {"type":"indoor","level":"normal"}
 }
 
 Rules:
-- Coordinate origin is the north-west room corner; x runs east, z runs south, y=0 is floor.
-- All dimensions in metres (estimate from context if not labelled).
-- Include every visible piece of furniture as an object.
-- Use role "suspect" for the accused/perpetrator, "witness" for the victim/witness.
-- If you cannot see people, omit the people array.
-- Return ONLY the JSON — no explanation."""
+- Metres. Origin is the north-west corner of the whole plan; x runs east, z runs south, y=0 is the
+  floor. The top of a drawing is north. In a photograph the wall facing the camera is north, the
+  left wall west, the right wall east and the camera side south.
+- With no scale, take a door as 0.9 m wide (2.1 m tall); single bed 0.9 x 2.0 m, double bed
+  1.6 x 2.0 m, table height 0.75 m.
+- "walls": every outer AND inner wall as a straight segment from "a" to "b" along the wall's centre
+  line; exterior=true for outer walls. Split a wall only where the plan turns a corner.
+- "openings": EVERY door (also open doorways and arches) and EVERY window on that wall.
+  "offset_m" is the distance from the wall's "a" end to the opening's nearer edge, "width_m" its
+  width. Doors: "hinge" is "start" if the hinge is at the edge nearer "a", else "end"; "opens" is
+  the side (north/south/east/west) the door leaf swings into (drawn as the quarter-circle arc).
+- "outline": the outer boundary of the floor as a polygon, clockwise from the north-west corner.
+- "areas": one per room or space, its bounding rectangle, a short name (bedroom, hall, kitchen...).
+- Objects: every piece of furniture or fixture; "type" is one short lowercase word (bed, sofa,
+  chair, table, desk, cabinet, wardrobe, shelf, tv, fridge, stove, sink, toilet, bathtub, counter).
+  "pos" is the centre of its base, "size" [width, height, depth], "rot_y_deg" clockwise from above.
+- People only if visible (role suspect, witness or other); evidence only if marked as evidence.
+- Every id unique. Keep everything inside the outline. Return ONLY the JSON object."""
 
     try:
         if not container.settings.gemini_configured:
-            raise ProviderError("Gemini not configured", provider="gemini")
+            raise ProviderError("Gemini is not configured on the server", provider="gemini")
+        ref = sample_plan.sample_image()
+        example = (ref, "image/png", sample_plan.sample_scene()) if ref else None
         vision = GeminiVision(container.settings)
-        raw_scene = await vision.analyze(raw, mime, SCENE_PROMPT)
-        scene = Scene.model_validate(coerce_scene_input(raw_scene))
-        return scene.model_dump()
+        raw_scene = await vision.analyze(raw, mime, SCENE_PROMPT, example=example)
+        scene = Scene.model_validate(raw_scene)
+        # snap to the grid and keep everything inside the walls (no overlap nudging: the image
+        # is the source of truth for where things are)
+        out = clamp_scene(snap_scene(scene)).model_dump()
+        out["_source"] = "image"
+        return out
     except Exception as exc:  # noqa: BLE001
-        from app.core.logging import get_logger
         get_logger(__name__).warning("scene map analysis failed: %s", exc)
-        # Return a minimal default scene so the frontend still has something to show
-        return {
-            "room": {"width_m": 6.0, "depth_m": 5.0, "doors": [], "windows": []},
-            "objects": [],
-            "people": [],
-            "evidence": [],
-            "lighting": {"type": "indoor", "level": "normal"},
-            "_error": str(exc),
-        }
-
+        return sample(str(exc))

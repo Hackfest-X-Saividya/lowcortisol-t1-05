@@ -1,6 +1,8 @@
 // CrimeScene3D — interactive 3D crime-scene viewer (three.js + drei).
-// Renders the same scene JSON as SceneMap. Furniture, doors and windows come from the scene
-// (e.g. detected from an uploaded image); humanoid figures can be added and dragged anywhere.
+// Renders the same scene JSON as SceneMap: a single room, or a multi-room floor plan (walls with
+// their doors and windows, as in the sample plan 2D/data/image.png). Furniture, doors and windows
+// come from the scene (e.g. detected from an uploaded image); humanoid figures can be added and
+// dragged anywhere.
 //
 // Props:
 //   scene       — scene JSON (room, objects, people, evidence)
@@ -12,10 +14,12 @@
 //                   { type: "set", coll, index, field, value }
 //   personLabel — (person) => string
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, Text, Grid } from "@react-three/drei";
+import { OrbitControls, Text, Grid, Line } from "@react-three/drei";
 import * as THREE from "three";
+import { TurnLeftGlyph, TurnRightGlyph } from "./Glyph.jsx";
+import { planOutline, planWalls, solidRuns, wallFrame, wallOpenings } from "./scenePlan.js";
 
 const C = {
   floor: "#d6c597",
@@ -36,10 +40,12 @@ const C = {
   selected: "#ffcc00",
   skin: "#d8b08c",
   pants: "#2c2a36",
+  areaLabel: "#7a6a3e",
 };
 
 const WALL_H = 3.0;
-const WALL_T = 0.18;
+const WALL_T = 0.2; // outer walls
+const WALL_T_INNER = 0.12;
 const DOOR_H = 2.1;
 const WIN_BASE = 0.9;
 const WIN_H = 1.2;
@@ -262,116 +268,115 @@ function EvidenceMarker({ pos, label, selected, onDown, onClick }) {
   );
 }
 
-// ── Room: walls with real openings, door leaves, window glass ────────────────
+// ── Room: plan walls with real openings, door leaves, window glass ────────────
+// Walls come from scenePlan: a floor plan's own walls (outer and inner), or the four sides of a
+// plain room. Each wall is drawn in its own frame: local x runs along it from a to b, local z is
+// its left-hand normal.
 
-function wallPlace(room, wall, offset, width) {
-  const W = room.width_m;
-  const D = room.depth_m;
-  const len = wall === "north" || wall === "south" ? W : D;
-  const o = clamp(Number(offset) || 0, 0, len - 0.2);
-  const w = clamp(Number(width) || 0.9, 0.2, len - o);
-  const mid = o + w / 2;
-  if (wall === "north") return { x: mid, z: 0, rotY: 0, o, w, len };
-  if (wall === "south") return { x: mid, z: D, rotY: 0, o, w, len };
-  if (wall === "west") return { x: 0, z: mid, rotY: Math.PI / 2, o, w, len };
-  return { x: W, z: mid, rotY: Math.PI / 2, o, w, len };
-}
-
-function WallPiece({ room, wall, start, length, y0, y1 }) {
-  if (length < 0.02 || y1 - y0 < 0.02) return null;
-  const p = wallPlace(room, wall, start, length);
+function WallRun({ start, end, y0, y1, t }) {
+  if (end - start < 0.02 || y1 - y0 < 0.02) return null;
   return (
-    <mesh position={[p.x, (y0 + y1) / 2, p.z]} rotation={[0, p.rotY, 0]} castShadow receiveShadow>
-      <boxGeometry args={[length, y1 - y0, WALL_T]} />
+    <mesh position={[(start + end) / 2, (y0 + y1) / 2, 0]} castShadow receiveShadow>
+      <boxGeometry args={[end - start, y1 - y0, t]} />
       <meshStandardMaterial color={C.wall} roughness={0.9} />
     </mesh>
   );
 }
 
-function DoorMesh({ room, door }) {
-  const p = wallPlace(room, door.wall, door.offset_m, door.width_m);
+function DoorPiece({ op, t }) {
   const fw = 0.06;
+  const leaf = op.w - 2 * fw;
+  const hinge = op.dir > 0 ? op.o + fw : op.o + op.w - fw;
+  const open = Math.PI / 2 - 0.15; // leaf stands almost square to the wall, like the plan's arc
+  const arc = Array.from({ length: 17 }, (_, k) => {
+    const a = (k / 16) * (Math.PI / 2);
+    return [hinge + op.dir * leaf * Math.cos(a), 0.015, op.side * leaf * Math.sin(a)];
+  });
   return (
-    <group position={[p.x, 0, p.z]} rotation={[0, p.rotY, 0]}>
-      {/* frame */}
-      <Part p={[-p.w / 2 + fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, WALL_T + 0.04]} c={C.doorFrame} />
-      <Part p={[p.w / 2 - fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, WALL_T + 0.04]} c={C.doorFrame} />
-      <Part p={[0, DOOR_H - fw / 2, 0]} s={[p.w, fw, WALL_T + 0.04]} c={C.doorFrame} />
-      {/* leaf, hinged on one side and swung part-open */}
-      <group position={[-p.w / 2 + fw, 0, 0]} rotation={[0, -1.05, 0]}>
-        <Part p={[(p.w - 2 * fw) / 2, (DOOR_H - fw) / 2, 0]} s={[p.w - 2 * fw, DOOR_H - fw, 0.045]} c={C.door} />
-        <Part p={[p.w - 2 * fw - 0.1, 1.0, 0.04]} s={[0.06, 0.04, 0.05]} c="#d8d2c0" />
+    <group>
+      <Part p={[op.o + fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, t + 0.04]} c={C.doorFrame} />
+      <Part p={[op.o + op.w - fw / 2, DOOR_H / 2, 0]} s={[fw, DOOR_H, t + 0.04]} c={C.doorFrame} />
+      <Part p={[op.o + op.w / 2, DOOR_H - fw / 2, 0]} s={[op.w, fw, t + 0.04]} c={C.doorFrame} />
+      <group position={[hinge, 0, 0]} rotation={[0, -op.dir * op.side * open, 0]}>
+        <Part p={[(op.dir * leaf) / 2, (DOOR_H - fw) / 2, 0]} s={[leaf, DOOR_H - fw, 0.045]} c={C.door} />
+        <Part p={[op.dir * (leaf - 0.1), 1.0, 0]} s={[0.04, 0.04, 0.14]} c="#d8d2c0" />
       </group>
-      <Text position={[0, DOOR_H + 0.2, 0]} fontSize={0.16} color="#14120F" anchorX="center" outlineWidth={0.015} outlineColor="#e4d3a8">
-        door
-      </Text>
+      <Line points={[[hinge, 0.015, 0], ...arc]} color={C.doorFrame} lineWidth={1.2} transparent opacity={0.7} />
     </group>
   );
 }
 
-function WindowMesh({ room, win }) {
-  const p = wallPlace(room, win.wall, win.offset_m, win.width_m);
+function WindowPiece({ op, t }) {
   const ft = 0.05;
+  const cx = op.o + op.w / 2;
   return (
-    <group position={[p.x, 0, p.z]} rotation={[0, p.rotY, 0]}>
-      <mesh position={[0, WIN_BASE + WIN_H / 2, 0]}>
-        <planeGeometry args={[p.w, WIN_H]} />
+    <group>
+      <mesh position={[cx, WIN_BASE + WIN_H / 2, 0]}>
+        <planeGeometry args={[op.w, WIN_H]} />
         <meshStandardMaterial color={C.window} transparent opacity={0.45} side={THREE.DoubleSide} />
       </mesh>
-      <Part p={[0, WIN_BASE + ft / 2, 0]} s={[p.w, ft, WALL_T + 0.04]} c={C.windowFrame} />
-      <Part p={[0, WIN_BASE + WIN_H - ft / 2, 0]} s={[p.w, ft, WALL_T + 0.04]} c={C.windowFrame} />
-      <Part p={[-p.w / 2 + ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, WALL_T + 0.04]} c={C.windowFrame} />
-      <Part p={[p.w / 2 - ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, WALL_T + 0.04]} c={C.windowFrame} />
-      <Part p={[0, WIN_BASE + WIN_H / 2, 0]} s={[ft * 0.6, WIN_H, 0.03]} c={C.windowFrame} />
-      <Text position={[0, WIN_BASE + WIN_H + 0.2, 0]} fontSize={0.16} color="#14120F" anchorX="center" outlineWidth={0.015} outlineColor="#e4d3a8">
-        window
-      </Text>
+      <Part p={[cx, WIN_BASE + ft / 2, 0]} s={[op.w, ft, t + 0.04]} c={C.windowFrame} />
+      <Part p={[cx, WIN_BASE + WIN_H - ft / 2, 0]} s={[op.w, ft, t + 0.04]} c={C.windowFrame} />
+      <Part p={[op.o + ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, t + 0.04]} c={C.windowFrame} />
+      <Part p={[op.o + op.w - ft / 2, WIN_BASE + WIN_H / 2, 0]} s={[ft, WIN_H, t + 0.04]} c={C.windowFrame} />
+      <Part p={[cx, WIN_BASE + WIN_H / 2, 0]} s={[ft * 0.6, WIN_H, 0.03]} c={C.windowFrame} />
+    </group>
+  );
+}
+
+function PlanWallMesh({ wall }) {
+  const { len, ux, uz } = wallFrame(wall);
+  const t = wall.exterior === false ? WALL_T_INNER : WALL_T;
+  const ops = wallOpenings(wall);
+  return (
+    <group position={[wall.a[0], 0, wall.a[1]]} rotation={[0, Math.atan2(-uz, ux), 0]}>
+      {/* solid runs reach half a thickness past each end so corners close */}
+      {solidRuns(len, ops, t / 2).map(([s0, s1]) => (
+        <WallRun key={`r${s0}`} start={s0} end={s1} y0={0} y1={WALL_H} t={t} />
+      ))}
+      {ops.map((op) =>
+        op.kind === "window" ? (
+          <group key={op.id}>
+            <WallRun start={op.o} end={op.o + op.w} y0={0} y1={WIN_BASE} t={t} />
+            <WallRun start={op.o} end={op.o + op.w} y0={WIN_BASE + WIN_H} y1={WALL_H} t={t} />
+            <WindowPiece op={op} t={t} />
+          </group>
+        ) : (
+          <group key={op.id}>
+            <WallRun start={op.o} end={op.o + op.w} y0={DOOR_H} y1={WALL_H} t={t} />
+            <DoorPiece op={op} t={t} />
+          </group>
+        ),
+      )}
     </group>
   );
 }
 
 function Room({ room }) {
-  const W = room.width_m;
-  const D = room.depth_m;
-  const doors = room.doors || [];
-  const windows = room.windows || [];
-
-  const pieces = [];
-  ["north", "south", "west", "east"].forEach((wall) => {
-    const len = wall === "north" || wall === "south" ? W : D;
-    const ops = [
-      ...doors.filter((d) => d.wall === wall).map((d) => ({ ...wallPlace(room, wall, d.offset_m, d.width_m), kind: "door" })),
-      ...windows.filter((w) => w.wall === wall).map((w) => ({ ...wallPlace(room, wall, w.offset_m, w.width_m), kind: "window" })),
-    ].sort((a, b) => a.o - b.o);
-
-    let cursor = 0;
-    ops.forEach((op, i) => {
-      if (cursor < op.o) pieces.push({ key: `${wall}-g${i}`, wall, start: cursor, length: op.o - cursor, y0: 0, y1: WALL_H });
-      if (op.kind === "door") {
-        pieces.push({ key: `${wall}-l${i}`, wall, start: op.o, length: op.w, y0: DOOR_H, y1: WALL_H });
-      } else {
-        pieces.push({ key: `${wall}-s${i}`, wall, start: op.o, length: op.w, y0: 0, y1: WIN_BASE });
-        pieces.push({ key: `${wall}-h${i}`, wall, start: op.o, length: op.w, y0: WIN_BASE + WIN_H, y1: WALL_H });
-      }
-      cursor = Math.max(cursor, op.o + op.w);
-    });
-    if (cursor < len) pieces.push({ key: `${wall}-end`, wall, start: cursor, length: len - cursor, y0: 0, y1: WALL_H });
-  });
-
+  const floor = useMemo(() => {
+    const shape = new THREE.Shape(planOutline(room).map(([x, z]) => new THREE.Vector2(x, -z)));
+    return new THREE.ShapeGeometry(shape);
+  }, [room]);
   return (
     <group>
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[W / 2, 0, D / 2]}>
-        <planeGeometry args={[W, D]} />
-        <meshStandardMaterial color={C.floor} roughness={0.95} />
+      <mesh geometry={floor} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <meshStandardMaterial color={C.floor} roughness={0.95} side={THREE.DoubleSide} />
       </mesh>
-      {pieces.map(({ key, ...rest }) => (
-        <WallPiece key={key} room={room} {...rest} />
+      {planWalls(room).map((w) => (
+        <PlanWallMesh key={w.id} wall={w} />
       ))}
-      {doors.map((d) => (
-        <DoorMesh key={d.id} room={room} door={d} />
-      ))}
-      {windows.map((w) => (
-        <WindowMesh key={w.id} room={room} win={w} />
+      {(room.areas || []).map((a) => (
+        <Text
+          key={a.id}
+          position={[(a.rect[0] + a.rect[2]) / 2, 0.02, (a.rect[1] + a.rect[3]) / 2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          fontSize={0.32}
+          color={C.areaLabel}
+          anchorX="center"
+          anchorY="middle"
+        >
+          {a.name}
+        </Text>
       ))}
     </group>
   );
@@ -589,16 +594,16 @@ export default function CrimeScene3D({ scene, editable = false, onMove, onEdit, 
               <span className="tb-label">Selected: {selName}</span>
               {sel.coll !== "evidence" && (
                 <>
-                  <button type="button" className="scene-view-btn" title="Turn left 45°" onClick={() => rotate(-45)}>
-                    ↺
+                  <button type="button" className="scene-view-btn" title="Turn left 45°" aria-label="Turn left 45°" onClick={() => rotate(-45)}>
+                    <TurnLeftGlyph size={16} />
                   </button>
-                  <button type="button" className="scene-view-btn" title="Turn right 45°" onClick={() => rotate(45)}>
-                    ↻
+                  <button type="button" className="scene-view-btn" title="Turn right 45°" aria-label="Turn right 45°" onClick={() => rotate(45)}>
+                    <TurnRightGlyph size={16} />
                   </button>
                 </>
               )}
               <button type="button" className="scene-view-btn" onClick={remove}>
-                🗑 Remove
+                Remove
               </button>
             </>
           )}
@@ -623,6 +628,8 @@ export default function CrimeScene3D({ scene, editable = false, onMove, onEdit, 
           <span className="legend-dot" style={{ background: C.other }} /> Other
           <span className="legend-dot" style={{ background: C.evidence }} /> Evidence
           <span className="legend-dot" style={{ background: C.furniture }} /> Furniture
+          <span className="legend-dot" style={{ background: C.door }} /> Door
+          <span className="legend-dot" style={{ background: C.window }} /> Window
         </div>
         <div className="scene3d-hint">
           {canEdit ? "Click to select · drag to move · drag empty space to orbit · scroll to zoom" : "Drag to orbit · scroll to zoom · right-drag to pan"}

@@ -290,9 +290,10 @@ async def test_quota_429_trips_breaker_and_skips_provider(container) -> None:  #
         return_value=httpx.Response(429, headers={"Retry-After": "60"})
     )
     res = await reg.llm_json(prompts.translate("x", "hi", "en"))
-    assert res.provider == "mock" and groq.call_count == 2  # each Groq model once, no backoff
+    # each Groq model once (gpt-oss-120b, gpt-oss-20b, qwen3.8), no backoff
+    assert res.provider == "mock" and groq.call_count == 3
     res = await reg.llm_json(prompts.translate("y", "hi", "en"))
-    assert res.provider == "mock" and groq.call_count == 2  # cooling down: not called again
+    assert res.provider == "mock" and groq.call_count == 3  # cooling down: not called again
     assert any(k.startswith("llm:groq") for k in reg.status())
     await reg.aclose()
 

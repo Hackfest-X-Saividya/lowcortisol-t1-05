@@ -21,6 +21,7 @@
 
   /* type */
   --font-type: "Special Elite", "Courier Prime", "Courier New", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
   --font-hand: "Kalam", "Noto Sans Kannada", "Noto Sans Devanagari", "Segoe Print", cursive;
   --font-fell: "IM Fell English", "Old Standard TT", Georgia, serif;
   --font-kn: "Noto Sans Kannada", "Noto Sans", system-ui, sans-serif;

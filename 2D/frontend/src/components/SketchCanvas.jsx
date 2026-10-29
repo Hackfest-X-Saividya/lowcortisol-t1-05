@@ -13,10 +13,13 @@ export default function SketchCanvas({ frame, className = "", onShown }) {
   const [cur, setCur] = useState(null);
   const [prev, setPrev] = useState(null);
   const curRef = useRef(null);
+  // the last drawing whose shading finished appearing: it stays under a new drawing until that
+  // one is complete, so quick successive updates never leave the sheet empty
+  const shownRef = useRef(null);
 
   useEffect(() => {
     if (!frame || frame.id === curRef.current?.id) return;
-    setPrev(curRef.current);
+    setPrev(shownRef.current);
     curRef.current = frame;
     setCur(frame);
   }, [frame]);
@@ -33,6 +36,7 @@ export default function SketchCanvas({ frame, className = "", onShown }) {
             src={cur.shade}
             alt="Pencil sketch of the person, as described so far"
             onAnimationEnd={() => {
+              shownRef.current = cur;
               setPrev(null);
               onShown?.(cur);
             }}

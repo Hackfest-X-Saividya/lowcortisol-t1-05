@@ -1,4 +1,4 @@
-"""Live sketch: instant library drawing, background portrait, commit as a version, interim
+"""Live sketch: background portrait (no stock library face), commit as a version, interim
 transcription."""
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ async def _latest(client: httpx.AsyncClient, sid: str, headers: dict[str, str]) 
 
 
 @pytest.mark.asyncio
-async def test_live_render_instant_then_portrait_then_commit(
+async def test_live_render_portrait_then_commit(
     client: httpx.AsyncClient, users: dict[str, Any], library: Path
 ) -> None:
     officer = await login(client, "officer1")
@@ -83,7 +83,8 @@ async def test_live_render_instant_then_portrait_then_commit(
         "preview_fields": [],
     }
 
-    # words still being spoken: drawn at once from the library face, nothing stored
+    # words still being spoken: the sketch is drawn in the background (no stock library face
+    # in the meantime), nothing stored
     r = await client.post(
         f"{API}/sessions/{sid}/interview/render",
         json={"text": "He was about forty with a long nose"},
@@ -91,8 +92,8 @@ async def test_live_render_instant_then_portrait_then_commit(
     )
     assert r.status_code == 200, r.text
     pv = r.json()
-    assert pv["ready"] and pv["kind"] == "instant" and pv["version_id"] is None
-    assert pv["lines_b64"] and pv["sketch_b64"] and "nose" in pv["preview_fields"]
+    assert not pv["ready"] and pv["reason"] == "drawing" and pv["pending"]
+    assert "nose" in pv["preview_fields"]
     tree = (await client.get(f"{API}/sessions/{sid}/sketch-tree", headers=officer)).json()
     assert tree == []
 
@@ -141,7 +142,7 @@ async def test_live_render_instant_then_portrait_then_commit(
             headers=officer,
         )
     ).json()
-    assert len(au["items"]) == 4
+    assert len(au["items"]) == 3  # the three commits (the preview had no sketch yet)
 
     # another officer cannot read this session's drawings
     other = await login(client, "officer2")

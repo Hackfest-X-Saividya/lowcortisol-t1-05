@@ -588,7 +588,8 @@ class MockLLM:
             ("shop", ("shop", "store", "counter", "dukaan", "दुकान", "angadi", "ಅಂಗಡಿ")),
             ("street", ("street", "road", "lane", "sadak", "सड़क", "raste", "ರಸ್ತೆ")),
             ("junction", ("junction", "crossing", "circle", "chauraha", "चौराहा", "signal")),
-            ("room", ("room", "house", "flat", "kamra", "कमरा", "mane", "ಮನೆ")),
+            ("house", ("house", "home", "flat", "ghar", "घर", "mane", "ಮನೆ")),
+            ("room", ("room", "kamra", "कमरा")),
         ):
             if any(w in text for w in words):
                 name = key

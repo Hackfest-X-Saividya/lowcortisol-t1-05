@@ -21,7 +21,10 @@ def render_top_down(scene: Scene, px_per_m: float = 80.0, margin: int = 60) -> n
     def pt(x: float, z: float) -> tuple[int, int]:
         return int(margin + x * px_per_m), int(margin + z * px_per_m)
 
-    cv2.rectangle(img, pt(0, 0), pt(scene.room.width_m, scene.room.depth_m), (80, 80, 80), 3)
+    if scene.room.walls:
+        _plan_walls(img, scene, pt)
+    else:
+        cv2.rectangle(img, pt(0, 0), pt(scene.room.width_m, scene.room.depth_m), (80, 80, 80), 3)
     for door in scene.room.doors:
         _wall_marker(img, scene, door.wall, door.offset_m, door.width_m, (30, 120, 200), pt)
     for win in scene.room.windows:
@@ -103,6 +106,45 @@ def render_top_down(scene: Scene, px_per_m: float = 80.0, margin: int = 60) -> n
     for z in range(int(scene.room.depth_m) + 1):
         cv2.line(img, pt(0, z), pt(scene.room.width_m, z), (225, 225, 225), 1)
     return img
+
+
+def _plan_walls(img, scene, pt):  # type: ignore[no-untyped-def]
+    """Floor-plan walls: solid runs, gaps for doors, a thin double line for windows."""
+    for w in scene.room.walls:
+        (ax, az), (bx, bz) = w.a, w.b
+        length = math.hypot(bx - ax, bz - az) or 1.0
+        ux, uz = (bx - ax) / length, (bz - az) / length
+
+        def at(s: float) -> tuple[int, int]:
+            return pt(ax + ux * s, az + uz * s)  # noqa: B023
+
+        cursor = 0.0
+        for op in sorted(w.openings, key=lambda o: o.offset_m):
+            o0 = min(max(op.offset_m, 0.0), length)
+            o1 = min(o0 + op.width_m, length)
+            if o0 > cursor:
+                cv2.line(img, at(cursor), at(o0), (80, 80, 80), 5 if w.exterior else 3)
+            if op.kind == "window":
+                cv2.line(img, at(o0), at(o1), (200, 160, 30), 2)
+            else:
+                hinge = o0 if op.hinge == "start" else o1
+                cv2.circle(img, at(hinge), 3, (30, 120, 200), -1)
+            cursor = max(cursor, o1)
+        if cursor < length:
+            cv2.line(img, at(cursor), at(length), (80, 80, 80), 5 if w.exterior else 3)
+    for area in scene.room.areas:
+        x0, z0, x1, z1 = area.rect
+        c = pt((x0 + x1) / 2, (z0 + z1) / 2)
+        cv2.putText(
+            img,
+            area.name,
+            (c[0] - 4 * len(area.name), c[1]),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (120, 120, 120),
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _wall_marker(img, scene, wall, offset, width, colour, pt):  # type: ignore[no-untyped-def]

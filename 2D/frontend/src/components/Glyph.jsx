@@ -39,6 +39,30 @@ export function PinGlyph({ size = 18 }) {
   );
 }
 
+export function CrossGlyph({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" {...base}>
+      <path d="M4.5 4.5L13.5 13.5M13.5 4.5L4.5 13.5" />
+    </svg>
+  );
+}
+
+export function TurnLeftGlyph({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" {...base}>
+      <path d="M5 5.5A6 6 0 1 1 3.5 10M5 2V5.5H8.5" />
+    </svg>
+  );
+}
+
+export function TurnRightGlyph({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" {...base}>
+      <path d="M13 5.5A6 6 0 1 0 14.5 10M13 2V5.5H9.5" />
+    </svg>
+  );
+}
+
 export function MicGlyph({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden="true" {...base}>
