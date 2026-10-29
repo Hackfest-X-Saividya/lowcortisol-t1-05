@@ -182,6 +182,7 @@ async def interim_transcribe(
         None,
         language if language in ("kn", "hi", "en") else "en",
         container.settings.max_audio_mb,
+        interim=True,
     )
     audit.record(
         db,

@@ -29,7 +29,8 @@ def test_describe_labels_every_feature_and_invents_nothing() -> None:
         )
     )  # fmt: skip
     text = pt.describe(snap)
-    assert "one Indian man, age 25-30." in text
+    assert "one Indian man (male), age 25-30." in text
+    assert text.startswith("Straight front view")  # image models weigh the start most
     assert "Hair: long curly." in text and "Build: very fat." in text
     assert "Headwear: cap." in text and "No eyewear." in text
     assert "nose" not in text.split("Style:")[0].lower()  # not remembered -> not drawn

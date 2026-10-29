@@ -454,6 +454,13 @@ function WitnessWindow({ sid, token }) {
     const res = await sendTurn({ dont_remember: true });
     if (res) cycle(res.reply_local);
   };
+  // No sketch is drawn until the gender is known, and speech recognition can garble the
+  // answer (Kannada especially), so the gender question can also be answered with a tap.
+  const answerGender = async (word) => {
+    halt();
+    const res = await sendTurn({ text: word, language: lang, source: "typed" });
+    if (res) cycle(res.reply_local);
+  };
 
   useEffect(() => () => (running.current = false), []);
   useEffect(() => {
@@ -577,6 +584,16 @@ function WitnessWindow({ sid, token }) {
                 <InkButton variant="solid" className="continue big" onClick={halt} disabled={busy}>
                   {phase === "speaking" ? "Skip" : "One moment"}
                 </InkButton>
+              )}
+              {live?.ask_field === "gender" && (
+                <div className="choose-row pair">
+                  <InkButton onClick={() => answerGender(t("genderMan"))} disabled={busy}>
+                    {lang === "en" ? "Man" : `Man · ${t("genderMan")}`}
+                  </InkButton>
+                  <InkButton onClick={() => answerGender(t("genderWoman"))} disabled={busy}>
+                    {lang === "en" ? "Woman" : `Woman · ${t("genderWoman")}`}
+                  </InkButton>
+                </div>
               )}
               <div className="choose-row pair">
                 <InkButton onClick={repeat} disabled={busy || !live}>

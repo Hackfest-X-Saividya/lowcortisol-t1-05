@@ -177,11 +177,13 @@ class ProviderRegistry:
 
     # ---- ASR -----------------------------------------------------------------------------
 
-    async def transcribe(self, audio: bytes, mime: str, language: str) -> Transcript:
+    async def transcribe(
+        self, audio: bytes, mime: str, language: str, interim: bool = False
+    ) -> Transcript:
         import hashlib
 
         errors: list[str] = []
-        for name in self.settings.asr_chain:
+        for name in self.settings.asr_chain_for(language, interim):
             provider = self.asrs.get(name)
             if provider is None or self._cooling("asr", name):
                 continue
@@ -353,11 +355,12 @@ def build_registry(settings: Settings, files: FileStore, db: Database) -> Provid
         return reg
     if settings.gemini_configured:
         try:
-            from app.providers.gemini import GeminiLLM
+            from app.providers.gemini import GeminiASR, GeminiLLM
 
             g = GeminiLLM(settings)
             reg.llms["gemini"] = g
-            reg._closeables.append(g)
+            reg.asrs["gemini"] = GeminiASR(settings)
+            reg._closeables += [g, reg.asrs["gemini"]]
             if settings.tts_enabled:
                 from app.providers.gemini import GeminiTTS
 

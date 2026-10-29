@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.container import Container
 from app.core import audit
+from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.core.security import Principal
 from app.db.models.sketch import SketchVersion
@@ -164,6 +165,12 @@ def region_prompt(sheet: dict[str, Any], region: str) -> str:
 
 def has_face_details(sheet: dict[str, Any]) -> bool:
     return any(_val(sheet, k) for k in FACE_FIELDS)
+
+
+def gender_given(sheet: dict[str, Any]) -> bool:
+    """The witness has said the gender, or said they do not remember it."""
+    v = sheet.get("gender")
+    return isinstance(v, dict) and bool(str(v.get("value", "")).strip())
 
 
 def realistic_prompt(sheet: dict[str, Any], style: str | None = None) -> str:
@@ -314,6 +321,130 @@ async def _checked(
     got = await _flux_edit(container, img, pt.edit_instruction(fixes, GEN_STYLE), seed)
     # no redraw on the fallback service: its rate limit would cool it down for minutes
     return got if got is not None else (img, provider, model)
+
+
+# Every portrait must be one face seen straight from the front, of the described gender. The
+# image services ignore "front view" now and then (three-quarter views, a woman for "man"), so
+# each attempt is measured and checked, and a failing one is drawn again with another seed.
+PORTRAIT_ATTEMPTS = 3
+# |nose position between the cheek edges - 0.5|: 0.00-0.03 measured on frontal portraits,
+# 0.11-0.15 on slightly turned heads and 0.27-0.33 on three-quarter views.
+MAX_HEAD_TURN = 0.12
+# mismatches that make a sketch a different person: never shown
+HARD_MISMATCH = {"gender", "framing"}
+
+
+def head_turn(lm: np.ndarray) -> float:
+    """How far the head is turned sideways (0 = straight at the viewer), from the nose tip's
+    position between the left and right face edges (MediaPipe points 1, 234 and 454)."""
+    left, right, nose = lm[234, 0], lm[454, 0], lm[1, 0]
+    return float(abs((nose - left) / max(right - left, 1e-6) - 0.5))
+
+
+async def _identity_mismatches(
+    container: Container, photo: np.ndarray, snap: dict[str, str]
+) -> list[str] | None:
+    """Described features the image clearly contradicts (vision model); None = not checked."""
+    if not snap or not container.settings.sketch_verify:
+        return None
+    small = cv2.resize(photo, (768, 768), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    if not ok:
+        return None
+    try:
+        res = await asyncio.wait_for(
+            container.providers.vision_json(pt.check_request(buf.tobytes(), snap)),
+            CHECK_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("live_render: portrait check unavailable (%s)", type(exc).__name__)
+        return None
+    if res.provider == "mock":
+        log.warning("live_render: portrait not checked (vision model busy or rate limited)")
+        return None  # the offline stand-in always says "matches"
+    fields = [str(m.get("field", "")) for m in (res.data.get("mismatches") or [])]
+    return [f for f in fields if f == "framing" or f in snap]
+
+
+_RETRY_AFTER = re.compile(r"retry after (\d+)\s*s", re.IGNORECASE)
+MAX_LIMIT_WAIT_S = 60
+
+
+async def _generate(container: Container, req: ImageRequest) -> Any:
+    """One image. A short free-tier limit (Pollinations: one image every 45 s per IP) is
+    waited out once, so a redraw is not lost to it."""
+    for tries in range(2):
+        try:
+            return await asyncio.wait_for(
+                container.providers.generate_image(req), PORTRAIT_TIMEOUT_S
+            )
+        except ProviderError as exc:
+            m = _RETRY_AFTER.search(exc.message)
+            if tries or m is None or int(m.group(1)) > MAX_LIMIT_WAIT_S:
+                raise
+            log.info("live_render: image service asks to wait %ss before the next image", m[1])
+            await asyncio.sleep(int(m.group(1)) + 1)
+    raise AssertionError("unreachable")
+
+
+async def _front_facing_photo(
+    container: Container, prompt: str, snap: dict[str, str], seed: int
+) -> tuple[np.ndarray, Any]:
+    """Generate the portrait, redrawing (new seed) any attempt that is not exactly one
+    front-facing face or that shows a different gender than described. Raises when no attempt
+    qualifies, so the witness keeps the previous sketch instead of a wrong one."""
+    s = container.settings
+    checkable = not s.mock_mode and container.landmarker is not None
+    # with the FLUX.2 edit model available, _checked fixes smaller mismatches by editing
+    verify = checkable and not _flux_edit_ready(container)
+    best: tuple[tuple[int, int, float], np.ndarray, Any] | None = None
+    problems: list[str] = []
+    for attempt in range(PORTRAIT_ATTEMPTS):
+        req = ImageRequest(
+            prompt=prompt,
+            negative_prompt=NEGATIVE,
+            width=SIZE,
+            height=SIZE,
+            seed=(seed + attempt * 104_729) % 2_000_000_000,
+        )
+        try:
+            res = await _generate(container, req)
+        except (ProviderError, TimeoutError) as exc:
+            if attempt == 0:
+                raise
+            problems.append(f"redraw failed ({type(exc).__name__})")
+            break
+        photo = decode_png(res.png)
+        if photo.shape[:2] != (SIZE, SIZE):
+            photo = cv2.resize(photo, (SIZE, SIZE), interpolation=cv2.INTER_AREA)
+        if not checkable or res.provider == "mock":
+            return photo, res
+        faces = await asyncio.to_thread(container.landmarker.detect, photo)
+        if len(faces) != 1:
+            problems.append(f"{len(faces)} faces")
+            continue
+        turn = head_turn(faces[0])
+        if turn > MAX_HEAD_TURN:
+            problems.append(f"head turned {turn:.2f}")
+            continue
+        wrong = (await _identity_mismatches(container, photo, snap)) if verify else None
+        hard = sorted(set(wrong or []) & HARD_MISMATCH)
+        if hard:
+            problems.append("wrong " + "/".join(hard))
+            continue
+        rank = (0, len(wrong or []), turn)
+        if rank[1] == 0:
+            return photo, res
+        problems.append(f"{rank[1]} small mismatches")
+        if best is None or rank < best[0]:
+            best = (rank, photo, res)
+    log.warning("live_render: portrait attempts rejected: %s", "; ".join(problems))
+    if best is not None:
+        return best[1], best[2]
+    raise ProviderError(
+        "no front-facing portrait matching the description: " + "; ".join(problems),
+        provider="image",
+    )
 
 
 _FULL_RE = re.compile(r"chubby|fat|plump|full|fleshy|heavy|round|puffy|wide")
@@ -565,22 +696,7 @@ async def portrait(container: Container, sheet: dict[str, Any], seed: int) -> di
     if photo_entry is None:
         snap = _face_now(sheet)
         drawing_prompt = await _generation_prompt(container, snap)
-        negative = NEGATIVE
-        res = await asyncio.wait_for(
-            container.providers.generate_image(
-                ImageRequest(
-                    prompt=drawing_prompt,
-                    negative_prompt=negative,
-                    width=SIZE,
-                    height=SIZE,
-                    seed=seed,
-                )
-            ),
-            PORTRAIT_TIMEOUT_S,
-        )
-        photo = decode_png(res.png)
-        if photo.shape[:2] != (SIZE, SIZE):
-            photo = cv2.resize(photo, (SIZE, SIZE), interpolation=cv2.INTER_AREA)
+        photo, res = await _front_facing_photo(container, drawing_prompt, snap, seed)
         photo, gen_provider, gen_model = await _checked(
             container, photo, snap, res.provider, res.model, seed
         )
@@ -992,12 +1108,15 @@ async def render(
             for k, v in (data.get("fields") or {}).items()
             if k in FIELD_MAP and k in FACE_FIELDS and isinstance(v, dict)
         }
-        sheet = engine.merge_extracted(sheet, fields, source="preview")
+        sheet = engine.merge_extracted(sheet, fields, source="preview", said=text)
         if data.get("adjustments"):
             sheet[ADJUST_KEY] = apply_adjustments(sheet, list(data["adjustments"]))
         preview_fields = sorted(fields)
     if not has_face_details(sheet):
         return {"ready": False, "reason": "not_enough_detail", "preview_fields": preview_fields}
+    if not gender_given(sheet):
+        # a face drawn before the witness said man or woman would be the image model's guess
+        return {"ready": False, "reason": "need_gender", "preview_fields": preview_fields}
 
     seed = session_seed(sess.id)
     st = _state(sess.id)

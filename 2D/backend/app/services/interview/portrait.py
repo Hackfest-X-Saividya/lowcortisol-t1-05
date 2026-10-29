@@ -65,9 +65,14 @@ PHOTO_STYLE = (
     "proportions, head and shoulders, straight front view, eyes looking at the camera, neutral "
     "expression, mouth closed, flat even light, plain light grey background, no text."
 )
-# put first: image models weigh the start of a prompt most
-PENCIL_LEAD = "Graphite pencil drawing on white paper, a police forensic composite sketch."
-PHOTO_LEAD = "Unretouched police identification photograph."
+# put first: image models weigh the start of a prompt most (said only at the end, "front view"
+# was often ignored and the head drawn turned)
+FRONT = (
+    "Straight front view, like a passport photo: the face looks directly into the camera, "
+    "head not turned, both eyes and both ears equally visible."
+)
+PENCIL_LEAD = f"{FRONT} Graphite pencil drawing on white paper, a police forensic composite sketch."
+PHOTO_LEAD = f"{FRONT} Unretouched police identification photograph."
 KEEP = (
     "Keep everything else exactly as it is in image 0: the same person and identity, every "
     "other feature unchanged in shape, size and position, the same drawing style and shading, "
@@ -106,7 +111,8 @@ def _who(snap: dict[str, str]) -> str:
 def describe(snap: dict[str, str], style: str = "pencil") -> str:
     """Full prompt for a new sketch: one labelled sentence per described feature."""
     kind = "identification photograph" if style == "photo" else "forensic composite sketch"
-    head = f"A police {kind} of one Indian {_who(snap)}"
+    who = {"man": "man (male)", "woman": "woman (female)"}.get(_who(snap), "person")
+    head = f"{FRONT} A police {kind} of one Indian {who}"
     if snap.get("age_range"):
         head += f", age {snap['age_range']}"
     lines = [head + "."]

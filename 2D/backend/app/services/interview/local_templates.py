@@ -91,6 +91,15 @@ PATTERN = {
     "en": "What do you remember about the person's {label}?",
 }
 
+# Asked when the open gender question got no usable answer (often the speech recognition
+# garbled it). No sketch is drawn without it, so it is asked again, simply, with both choices
+# named equally; the witness can also tap Man / Woman / I don't remember.
+GENDER_RETRY = {
+    "kn": "ಆ ವ್ಯಕ್ತಿ ಗಂಡಸೋ ಹೆಂಗಸೋ?",
+    "hi": "वह व्यक्ति आदमी था या औरत?",
+    "en": "Was the person a man or a woman?",
+}
+
 ACK = {"kn": "ಸರಿ.", "hi": "ठीक है।", "en": "Thank you."}
 UPDATED = {
     "kn": "ಸರಿ, ಚಿತ್ರವನ್ನು ಬದಲಿಸಿದೆ.",

@@ -23,7 +23,7 @@ pip install -e ".[dev]"
 python scripts\download_assets.py
 python scripts\make_placeholder_overlays.py
 alembic upgrade head
-python -m app.seed.seed        # prints the demo users' passwords and the witness token ONCE
+python -m app.seed.seed        
 uvicorn app.main:app --reload
 ```
 

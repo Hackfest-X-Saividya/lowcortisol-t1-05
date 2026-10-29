@@ -29,7 +29,15 @@ from app.services import speech
 from app.services.interview import engine, prompts
 from app.services.interview.fields import ASKED_FIELDS, FIELD_MAP, NOT_REMEMBERED, filled
 from app.services.interview.leading_check import rule_check
-from app.services.interview.local_templates import ACK, OPENING, REVIEW, UPDATED, line, question_for
+from app.services.interview.local_templates import (
+    ACK,
+    GENDER_RETRY,
+    OPENING,
+    REVIEW,
+    UPDATED,
+    line,
+    question_for,
+)
 
 ADJUST_KEY = "_adjust"
 ADJUST_LIMIT = 0.45
@@ -38,6 +46,9 @@ MAX_EDITS = 12
 # Live sketching: the face first, so the drawing starts at once; the viewing conditions
 # (light, distance, time, angle) are still asked, at the end.
 STAGE_ORDER = ("overall", "face", "marks", "situation")
+# No portrait is drawn until the gender is known, so a gender answer that did not come through
+# (e.g. garbled speech recognition) is asked again, up to this many times in all.
+REASK = {"gender": 3}
 
 
 def upcoming_fields(sheet: dict[str, Any], asked: set[str], n: int = 4) -> list[dict[str, str]]:
@@ -221,9 +232,24 @@ async def turn(
     answered_field = open_q.field_key if open_q else None
     direct = {k: v for k, v in fields.items() if k == answered_field}
     other = {k: v for k, v in fields.items() if k != answered_field}
-    sheet = engine.merge_extracted(sheet, other, source=f"statement:{st.id}")
+    said = f"{text} | {st.transcript_english}"  # corrections must come from these words
+    sheet = engine.merge_extracted(sheet, other, source=f"statement:{st.id}", said=said)
     if direct and open_q is not None:
-        sheet = engine.merge_extracted(sheet, direct, source=f"question:{open_q.id}")
+        sheet = engine.merge_extracted(
+            sheet, direct, source=f"question:{open_q.id}", said=said, answered=answered_field
+        )
+    if open_q is not None and answered_field == "gender" and not filled(sheet, "gender"):
+        # the LLM missed a plain "man" / "woman" (or a tap on those buttons)
+        spoken = engine.stated_gender(said)
+        if spoken:
+            fields["gender"] = {"value": spoken[0], "confidence": "high", "source_text": spoken[1]}
+            sheet = engine.merge_extracted(
+                sheet,
+                {"gender": fields["gender"]},
+                source=f"question:{open_q.id}",
+                said=said,
+                answered=answered_field,
+            )
     adjustments = list(data.get("adjustments") or [])
     if adjustments:
         sheet[ADJUST_KEY] = apply_adjustments(sheet, adjustments)
@@ -250,6 +276,7 @@ async def turn(
         len(questions),
         container.settings.interview_live_max_questions,
         order=STAGE_ORDER,
+        reask=REASK,
     )
     ack = UPDATED if adjustments else ACK
     new_q = None
@@ -265,7 +292,12 @@ async def turn(
         llm_en = str(data.get("reply_en") or "").strip()
         hit = rule_check(llm_en, ask_field) if llm_en else "empty"
         use_llm = data.get("ask_field") == ask_field and llm_local and not hit
-        if use_llm:
+        if ask_field == "gender" and ask_field in asked and step.stage != "check":
+            # asked before and still unanswered (see REASK)
+            use_llm = False
+            reply_local = f"{line(ack, lang)} {line(GENDER_RETRY, lang)}"
+            reply_en = f"{line(ack, 'en')} {line(GENDER_RETRY, 'en')}"
+        elif use_llm:
             reply_local, reply_en = llm_local, llm_en
         else:
             reply_local = f"{line(ack, lang)} {question_for(ask_field, lang)}"

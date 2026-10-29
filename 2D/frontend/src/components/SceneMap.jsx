@@ -1,7 +1,7 @@
 // Top-down crime-scene layout drawn as paper cut-outs on a sheet: a single room or a multi-room
 // floor plan (walls, door swings, windows; see scenePlan.js). Objects and people can be
 // dragged (when `editable`); dropping calls onMove(collection, index, [x, 0, z]).
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { planOutline, planWalls, solidRuns, wallFrame, wallOpenings } from "./scenePlan.js";
 
 const INK = "#14120F";
@@ -10,12 +10,14 @@ const RED = "#C8321E";
 export default function SceneMap({ scene, editable = false, onMove, labelFor, personLabel, showAnalysis, analysis }) {
   const svgRef = useRef(null);
   const [drag, setDrag] = useState(null); // {coll, index, x, z}
+  const clipId = useId();
   if (!scene?.room) return null;
   const W = scene.room.width_m;
   const D = scene.room.depth_m;
   const pad = 0.6;
   const vb = `${-pad} ${-pad} ${W + pad * 2} ${D + pad * 2}`;
   const unit = Math.max(W, D) / 40; // stroke unit in metres
+  const outline = planOutline(scene.room).map((p) => p.join(",")).join(" ");
 
   const toWorld = (e) => {
     const svg = svgRef.current;
@@ -58,14 +60,19 @@ export default function SceneMap({ scene, editable = false, onMove, labelFor, pe
       role="img"
       aria-label="Scene layout"
     >
-      {/* metre grid */}
-      {Array.from({ length: Math.floor(W) + 1 }, (_, i) => (
-        <line key={`gx${i}`} x1={i} y1={0} x2={i} y2={D} stroke={INK} strokeOpacity=".08" strokeWidth={unit * 0.15} />
-      ))}
-      {Array.from({ length: Math.floor(D) + 1 }, (_, i) => (
-        <line key={`gz${i}`} x1={0} y1={i} x2={W} y2={i} stroke={INK} strokeOpacity=".08" strokeWidth={unit * 0.15} />
-      ))}
-      <polygon points={planOutline(scene.room).map((p) => p.join(",")).join(" ")} fill={INK} fillOpacity=".03" />
+      {/* metre grid, inside the floor outline */}
+      <clipPath id={clipId}>
+        <polygon points={outline} />
+      </clipPath>
+      <g clipPath={`url(#${clipId})`}>
+        {Array.from({ length: Math.floor(W) + 1 }, (_, i) => (
+          <line key={`gx${i}`} x1={i} y1={0} x2={i} y2={D} stroke={INK} strokeOpacity=".08" strokeWidth={unit * 0.15} />
+        ))}
+        {Array.from({ length: Math.floor(D) + 1 }, (_, i) => (
+          <line key={`gz${i}`} x1={0} y1={i} x2={W} y2={i} stroke={INK} strokeOpacity=".08" strokeWidth={unit * 0.15} />
+        ))}
+      </g>
+      <polygon points={outline} fill={INK} fillOpacity=".03" />
       {(scene.room.areas || []).map((a) => (
         <text
           key={a.id}

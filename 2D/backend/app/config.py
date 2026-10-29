@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     groq_reasoning_effort: str = "low"  # low | medium | high (gpt-oss models only)
     # Verify in the Groq console: https://console.groq.com/docs/speech-to-text
     groq_asr_model: str = "whisper-large-v3"
+    # A finished answer in these languages is transcribed by Gemini first (Whisper's Kannada
+    # is often unreadable); Whisper stays the fallback and does the live words while the
+    # witness speaks (fast, and spares the Gemini quota). Comma separated.
+    gemini_asr_languages: str = "kn"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     image_primary: ImageName = "cloudflare"  # cloudflare | pollinations | mock
     # Verify in the Cloudflare Workers AI catalogue: https://developers.cloudflare.com/workers-ai/models/
@@ -109,8 +113,11 @@ class Settings(BaseSettings):
     # live sketch: pencil = drawn directly as a forensic graphite sketch (what the witness
     # sees); photo = realistic photo turned into pencil by the sketch filter
     sketch_style: Literal["pencil", "photo"] = "pencil"
-    # write the image prompt with the LLM and check each new sketch with the vision model
-    sketch_llm_prompt: bool = True
+    # sketch_llm_prompt: let the LLM reword the description as the image prompt. Off: the LLM
+    # adds details the witness never gave ("curly hair" -> "medium length, dark brown"); the
+    # prompt is then the witness's own words, one labelled line per feature.
+    # sketch_verify: check each new sketch with the vision model
+    sketch_llm_prompt: bool = False
     sketch_verify: bool = True
     provider_cache: bool = True
     http_timeout_s: float = 60.0
@@ -217,6 +224,13 @@ class Settings(BaseSettings):
         if self.mock_mode or not self.groq_configured:
             return ["mock"]
         return ["groq", "mock"]
+
+    def asr_chain_for(self, language: str, interim: bool = False) -> list[str]:
+        """``asr_chain``, with Gemini first for a finished answer in ``gemini_asr_languages``."""
+        langs = {x.strip() for x in self.gemini_asr_languages.split(",") if x.strip()}
+        if self.mock_mode or interim or not self.gemini_configured or language not in langs:
+            return self.asr_chain
+        return ["gemini", *self.asr_chain]
 
     @property
     def image_chain(self) -> list[str]:

@@ -112,3 +112,31 @@ async def test_upload_falls_back_to_sample_plan(
     body = r.json()
     assert body["_source"] == "sample" and body["_error"]
     assert len(body["room"]["walls"]) == 10
+
+
+async def test_upload_without_openings_falls_back_to_sample_plan(
+    client: httpx.AsyncClient, users: dict[str, User], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vision answer with no walls, doors or windows is not a floor plan: use the sample."""
+    import app.providers.gemini as gemini
+    from app.config import Settings
+
+    class BareRoomVision:
+        def __init__(self, settings: Settings) -> None:
+            pass
+
+        async def analyze(self, *args: object, **kwargs: object) -> dict:
+            return {"room": {"width_m": 6, "depth_m": 5}, "objects": []}
+
+    monkeypatch.setattr(Settings, "gemini_configured", property(lambda self: True))
+    monkeypatch.setattr(gemini, "GeminiVision", BareRoomVision)
+    h = await login(client, "officer1")
+    ok, other = cv2.imencode(".png", np.full((300, 400, 3), 255, np.uint8))
+    r = await client.post(
+        "/api/v1/sessions/any/scene/analyze-map",
+        files={"image": ("x.png", other.tobytes(), "image/png")},
+        headers=h,
+    )
+    body = r.json()
+    assert body["_source"] == "sample" and "no walls" in body["_error"]
+    assert len(body["room"]["walls"]) == 10

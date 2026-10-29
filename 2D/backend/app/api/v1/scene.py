@@ -185,6 +185,8 @@ Rules:
         vision = GeminiVision(container.settings)
         raw_scene = await vision.analyze(raw, mime, SCENE_PROMPT, example=example)
         scene = Scene.model_validate(raw_scene)
+        if not (scene.room.walls or scene.room.doors or scene.room.windows):
+            raise ProviderError("no walls, doors or windows found in the image", provider="gemini")
         # snap to the grid and keep everything inside the walls (no overlap nudging: the image
         # is the source of truth for where things are)
         out = clamp_scene(snap_scene(scene)).model_dump()

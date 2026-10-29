@@ -134,3 +134,28 @@ async def test_live_turn_permissions(client: httpx.AsyncClient, users: dict[str,
         headers=ctx["witness_headers"],
     )
     assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_kannada_gender_is_asked_again_and_a_tap_answers_it(
+    client: httpx.AsyncClient, users: dict[str, Any]
+) -> None:
+    officer = await login(client, "officer1")
+    ctx = await setup_session(client, officer, language="kn")
+    sid, wh = ctx["session_id"], ctx["witness_headers"]
+
+    async def turn(text: str) -> dict[str, Any]:
+        r = await client.post(
+            f"{API}/sessions/{sid}/interview/turn",
+            json={"text": text, "language": "kn", "source": "typed"},
+            headers=wh,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    t = await turn("ಉದ್ದ ಕೂದಲು, ಸಣ್ಣ ಮೂಗು")  # free recall without the gender
+    assert t["ask_field"] == "gender"
+    t = await turn("ಪುಡುಷಾವಿ")  # garbled answer: asked again, plainly
+    assert t["ask_field"] == "gender" and "ಗಂಡಸೋ ಹೆಂಗಸೋ" in t["reply_local"]
+    t = await turn("ಗಂಡಸು")  # the Man button sends the plain word
+    assert t["sheet"]["gender"]["value"] == "male" and t["ask_field"] != "gender"

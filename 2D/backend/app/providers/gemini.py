@@ -1,4 +1,5 @@
-"""Google Gemini via the official google-genai SDK: JSON-mode LLM and text-to-speech.
+"""Google Gemini via the official google-genai SDK: JSON-mode LLM, speech to text (Kannada)
+and text-to-speech.
 
 Model names come from ``GEMINI_MODEL`` / ``GEMINI_TTS_MODEL``; verify them in Google AI
 Studio because names change. The SDK talks to ``https://generativelanguage.googleapis.com``
@@ -23,7 +24,7 @@ from typing import Any
 from app.config import Settings
 from app.core.errors import ProviderError
 from app.core.logging import get_logger
-from app.providers.base import LLMRequest, LLMResult
+from app.providers.base import LLMRequest, LLMResult, Transcript
 
 log = get_logger(__name__)
 
@@ -107,6 +108,84 @@ class GeminiLLM:
                     )
                 await asyncio.sleep(0.6)
                 attempt += 1
+
+    async def aclose(self) -> None:
+        return None
+
+
+_ASR_LANGS = {
+    "kn": ("Kannada", "Kannada script"),
+    "hi": ("Hindi", "Devanagari script"),
+    "en": ("English", "English"),
+}
+
+
+class GeminiASR:
+    """Speech to text with Gemini's audio understanding. Whisper often writes Kannada as
+    sound-alike non-words ("ಪುಡುಷಾವಿ" for "ಪುರುಷ"); Gemini hears it far better. One call per
+    finished answer (see ``Settings.asr_chain_for``), so the free quota lasts."""
+
+    name = "gemini"
+
+    def __init__(self, settings: Settings) -> None:
+        from google import genai
+
+        self.model = settings.gemini_model
+        self.thinking_budget = settings.gemini_thinking_budget
+        self._client = genai.Client(
+            api_key=settings.gemini_api_key.get_secret_value(),
+            http_options={"timeout": int(settings.http_timeout_s * 1000)},
+        )
+
+    async def transcribe(self, audio: bytes, mime: str, language: str) -> Transcript:
+        from google.genai import errors as genai_errors
+        from google.genai import types
+
+        lang, script = _ASR_LANGS.get(language, _ASR_LANGS["en"])
+        prompt = (
+            f"Transcribe this recording of a witness speaking {lang}, word for word, in {script}."
+            " Write exactly what is said: do not translate, correct, explain or add anything;"
+            " keep English words as they are spoken. Output only the transcript, or nothing at"
+            " all if no speech is heard."
+        )
+        contents: list[Any] = [
+            types.Part.from_bytes(data=audio, mime_type=mime.split(";")[0]),
+            prompt,
+        ]
+        thinking = self.thinking_budget >= 0 and self.model not in _NO_THINKING_CONFIG
+        while True:
+            config: dict[str, Any] = {"temperature": 0.0}
+            if thinking:
+                config["thinking_config"] = types.ThinkingConfig(
+                    thinking_budget=self.thinking_budget
+                )
+            try:
+                resp = await self._client.aio.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config),
+                )
+                break
+            except genai_errors.APIError as exc:
+                code = int(getattr(exc, "code", None) or 0)
+                if code == 400 and thinking and "thinking" in str(exc).lower():
+                    _NO_THINKING_CONFIG.add(self.model)
+                    thinking = False
+                    continue
+                raise ProviderError(
+                    "Gemini quota exhausted" if code == 429 else f"Gemini ASR error {code}",
+                    provider=self.name,
+                    retryable=code in (429, 500, 502, 503, 504),
+                    status=code or None,
+                )
+            except Exception as exc:  # noqa: BLE001  network / SDK errors
+                raise ProviderError(
+                    f"Gemini ASR call failed: {type(exc).__name__}",
+                    provider=self.name,
+                    retryable=True,
+                )
+        text = " ".join((resp.text or "").split())  # the model sometimes breaks lines
+        return Transcript(text=text, language=language, provider=self.name, model=self.model)
 
     async def aclose(self) -> None:
         return None

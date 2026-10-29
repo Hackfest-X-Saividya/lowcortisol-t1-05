@@ -277,7 +277,9 @@ async def process_statement_job(ctx: JobContext, db: AsyncSession) -> dict[str, 
             prompts.extract_feature_sheet(original, english, st.language, fs.sheet)
         )
         extracted = res.data.get("fields", {})
-        fs.sheet = merge_extracted(fs.sheet, extracted, source=f"statement:{st.id}")
+        fs.sheet = merge_extracted(
+            fs.sheet, extracted, source=f"statement:{st.id}", said=f"{original} | {english}"
+        )
         st.status = "extracted"
         result["extracted_fields"] = sorted(extracted.keys())
         result["extraction_provider"] = res.provider
